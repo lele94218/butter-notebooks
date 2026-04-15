@@ -318,15 +318,11 @@
   min-width: 0;
   width: 100%;
   max-width: 100%;
-  overflow-x: hidden;
+  overflow: visible;
   /* grid layout: gap-3 between block children */
   display: grid;
   grid-template-columns: minmax(0, 1fr);
   gap: 12px;
-  touch-action: pan-y;
-}
-.prose * {
-  touch-action: pan-y;
 }
 
 /* Paragraphs */
