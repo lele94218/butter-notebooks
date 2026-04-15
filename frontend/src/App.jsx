@@ -489,7 +489,7 @@ function NotesPanel({ selectedNote }) {
 function CodePanel() {
   const theme = useContext(ThemeContext)
   const [entries, setEntries] = useState([])
-  const [dirPath, setDirPath] = useState('')
+  const [dirPath, setDirPath] = useState(() => localStorage.getItem('butter_code_dir') || '')
   const [openFile, setOpenFile] = useState(null)   // { path, name }
   const [code, setCode] = useState('')
   const [output, setOutput] = useState([])          // [{type, text/data}]
@@ -503,17 +503,28 @@ function CodePanel() {
   const loadDir = useCallback((path) => {
     fetch(`${API_BASE}/v1/files?path=${encodeURIComponent(path)}`, { headers: headers() })
       .then(r => r.json())
-      .then(d => { setEntries(d.entries || []); setDirPath(path) })
+      .then(d => { setEntries(d.entries || []); setDirPath(path); localStorage.setItem('butter_code_dir', path) })
       .catch(() => {})
   }, [])
 
-  useEffect(() => { loadDir('') }, [])
+  useEffect(() => {
+    const savedDir = localStorage.getItem('butter_code_dir') || ''
+    loadDir(savedDir)
+    // Re-open last file
+    const savedFile = localStorage.getItem('butter_code_file')
+    if (savedFile) {
+      fetch(`${API_BASE}/v1/files/read?path=${encodeURIComponent(savedFile)}`, { headers: headers() })
+        .then(r => r.json())
+        .then(d => { setOpenFile({ path: savedFile, name: savedFile.split('/').pop() }); setCode(d.content || '') })
+        .catch(() => {})
+    }
+  }, [])
 
   const openFileEntry = (entry) => {
     if (entry.is_dir) { loadDir(entry.path); return }
     fetch(`${API_BASE}/v1/files/read?path=${encodeURIComponent(entry.path)}`, { headers: headers() })
       .then(r => r.json())
-      .then(d => { setOpenFile(entry); setCode(d.content || ''); setOutput([]) })
+      .then(d => { setOpenFile(entry); setCode(d.content || ''); setOutput([]); localStorage.setItem('butter_code_file', entry.path) })
   }
 
   const saveFile = async () => {
@@ -696,11 +707,11 @@ export default function App() {
   }, [])
 
   const [notes, setNotes] = useState([])
-  const [selectedNote, setSelectedNote] = useState(null)
+  const [selectedNote, setSelectedNote] = useState(() => localStorage.getItem('butter_last_note') || null)
   const [openDirs, setOpenDirs] = useState({})
   const [sessionId, setSessionId] = useState(null)   // Claude session_id — for --resume only
   const [convId, setConvId] = useState(null)          // our stable conversation UUID
-  const [tab, setTab] = useState('chat')
+  const [tab, setTab] = useState(() => localStorage.getItem('butter_last_tab') || 'chat')
   const [sidebarTab, setSidebarTab] = useState('chats') // 'chats' | 'notes'
   const [sidebarOpen, setSidebarOpen] = useState(false)
 
@@ -828,7 +839,7 @@ export default function App() {
             <FileTree
               tree={buildTree(notes)}
               selectedNote={selectedNote}
-              onSelect={f => { setSelectedNote(f); setTab('notes'); setSidebarOpen(false) }}
+              onSelect={f => { setSelectedNote(f); localStorage.setItem('butter_last_note', f); setTab('notes'); localStorage.setItem('butter_last_tab', 'notes'); setSidebarOpen(false) }}
               openDirs={openDirs}
               toggleDir={key => setOpenDirs(prev => ({ ...prev, [key]: prev[key] === false ? true : false }))}
             />
@@ -848,9 +859,9 @@ export default function App() {
       <div className="main">
         <div className="tab-bar">
           <button className="menu-btn" onClick={() => setSidebarOpen(o => !o)}>☰</button>
-          <div className={`tab ${tab === 'chat' ? 'active' : ''}`} onClick={() => setTab('chat')}>Chat</div>
-          <div className={`tab ${tab === 'notes' ? 'active' : ''}`} onClick={() => setTab('notes')}>Notes</div>
-          <div className={`tab ${tab === 'code' ? 'active' : ''}`} onClick={() => setTab('code')}>Code</div>
+          <div className={`tab ${tab === 'chat' ? 'active' : ''}`} onClick={() => { setTab('chat'); localStorage.setItem('butter_last_tab', 'chat') }}>Chat</div>
+          <div className={`tab ${tab === 'notes' ? 'active' : ''}`} onClick={() => { setTab('notes'); localStorage.setItem('butter_last_tab', 'notes') }}>Notes</div>
+          <div className={`tab ${tab === 'code' ? 'active' : ''}`} onClick={() => { setTab('code'); localStorage.setItem('butter_last_tab', 'code') }}>Code</div>
         </div>
 
         {tab === 'chat'
