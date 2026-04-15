@@ -295,9 +295,33 @@ async def list_notes(request: Request, path: str = "", authorization: Optional[s
     base = Path(NOTES_ROOT) / path
     if not base.exists() or not base.is_dir():
         raise HTTPException(status_code=404, detail="Path not found")
-    files = []
-    for p in sorted(base.rglob("*.md")):
-        files.append(str(p.relative_to(NOTES_ROOT)))
+
+    def _scan():
+        import subprocess
+        # Use find via subprocess — runs in its own process, won't block the event loop
+        result = subprocess.run(
+            ["find", str(base), "-name", "*.md", "-type", "f"],
+            capture_output=True, text=True, timeout=10
+        )
+        files = []
+        for line in sorted(result.stdout.splitlines()):
+            p = Path(line.strip())
+            try:
+                files.append(str(p.relative_to(NOTES_ROOT)))
+            except ValueError:
+                pass
+        return files
+
+    try:
+        files = await asyncio.wait_for(
+            asyncio.get_event_loop().run_in_executor(None, _scan),
+            timeout=10
+        )
+    except Exception as e:
+        logger.warning(f"[notes] scan failed: {e}")
+        files = []
+
+    logger.info(f"[notes] count={len(files)}")
     return {"files": files, "root": NOTES_ROOT}
 
 
