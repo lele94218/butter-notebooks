@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import asyncio
 import base64
 import json
@@ -6,6 +8,7 @@ import os
 import tempfile
 import traceback
 from pathlib import Path
+from typing import Optional
 
 from dotenv import load_dotenv
 from fastapi import FastAPI, File, Header, HTTPException, UploadFile
@@ -24,10 +27,25 @@ from stt import whisper_transcribe
 # --- Config ---
 API_TOKEN = os.environ["API_TOKEN"]
 NOTES_ROOT = os.environ.get("NOTES_ROOT", str(Path.home()))
+DATA_DIR = Path(os.environ.get("DATA_DIR", Path.home() / ".butter-notebooks"))
+DATA_DIR.mkdir(parents=True, exist_ok=True)
+CONV_FILE = DATA_DIR / "conversations.json"
+
+
+# --- Conversations persistence ---
+def _load_convs() -> dict:
+    try:
+        return json.loads(CONV_FILE.read_text()) if CONV_FILE.exists() else {}
+    except Exception:
+        return {}
+
+
+def _save_convs(data: dict):
+    CONV_FILE.write_text(json.dumps(data, ensure_ascii=False))
 
 
 # --- Auth ---
-def verify_token(authorization: str | None):
+def verify_token(authorization: Optional[str]):
     if not authorization or not authorization.startswith("Bearer "):
         raise HTTPException(status_code=401, detail="Missing token")
     if authorization[7:] != API_TOKEN:
@@ -45,64 +63,79 @@ app.add_middleware(
 )
 
 
-# --- Agent chat (core) ---
-async def run_agent_stream(prompt: str, session_id: str | None = None):
-    """Run claude-agent-sdk query, yield SSE events."""
-    from claude_agent_sdk import (
-        query,
-        ClaudeAgentOptions,
-        AssistantMessage,
-        TextBlock,
-        ResultMessage,
-        SystemMessage,
-    )
+CLAUDE_BIN = os.environ.get("CLAUDE_BIN", "claude")
+CLAUDE_ALLOWED_TOOLS = "Read,Write,Edit,Glob,Grep,Bash"
+CLAUDE_SYSTEM_PROMPT = (
+    "You are a helpful assistant in a web app that renders Markdown and LaTeX via KaTeX. "
+    "When writing math formulas, ALWAYS use LaTeX delimiters: "
+    "inline math with $...$ and block/display math with $$...$$. "
+    "Never put math formulas inside code blocks. "
+    "Markdown tables, bold, italic, and headers are all rendered correctly."
+)
 
-    options = ClaudeAgentOptions(
-        cwd=NOTES_ROOT,
-        allowed_tools=["Read", "Write", "Edit", "Glob", "Grep", "Bash"],
-        permission_mode="acceptEdits",
-        max_turns=30,
-    )
+
+# --- Agent chat via claude CLI ---
+async def run_agent_stream(prompt: str, session_id: Optional[str] = None):
+    """Run `claude -p --output-format json`, read result from stderr, yield SSE."""
+    cmd = [
+        CLAUDE_BIN, "-p",
+        "--output-format", "json",
+        "--allowed-tools", CLAUDE_ALLOWED_TOOLS,
+        "--permission-mode", "acceptEdits",
+        "--dangerously-skip-permissions",
+        "--system-prompt", CLAUDE_SYSTEM_PROMPT,
+        prompt,
+    ]
     if session_id:
-        options = ClaudeAgentOptions(
-            cwd=NOTES_ROOT,
-            allowed_tools=["Read", "Write", "Edit", "Glob", "Grep", "Bash"],
-            permission_mode="acceptEdits",
-            max_turns=30,
-            resume=session_id,
-        )
+        cmd += ["--resume", session_id]
 
-    new_session_id = None
-    full_reply = ""
+    # Strip CLAUDECODE so nested claude CLI doesn't refuse to start
+    env = {k: v for k, v in os.environ.items() if k != "CLAUDECODE"}
 
     try:
-        async for message in query(prompt=prompt, options=options):
-            if isinstance(message, SystemMessage) and message.subtype == "init":
-                new_session_id = message.session_id
-                yield f"data: {json.dumps({'type': 'session', 'session_id': new_session_id})}\n\n"
+        proc = await asyncio.create_subprocess_exec(
+            *cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+            cwd=NOTES_ROOT,
+            env=env,
+        )
+    except Exception as e:
+        yield f"data: {json.dumps({'type': 'error', 'text': str(e)})}\n\n"
+        return
 
-            elif isinstance(message, AssistantMessage):
-                for block in message.content:
-                    if isinstance(block, TextBlock) and block.text:
-                        full_reply += block.text
-                        yield f"data: {json.dumps({'type': 'delta', 'text': block.text}, ensure_ascii=False)}\n\n"
+    try:
+        # json mode: full result arrives on stderr as a single JSON line
+        stdout_data, stderr_data = await proc.communicate()
+        raw = (stderr_data or stdout_data or b"").decode("utf-8", errors="replace").strip()
+        logger.info(f"claude raw output ({len(raw)} bytes): {raw[:200]}")
 
-            elif isinstance(message, ResultMessage):
-                yield f"data: {json.dumps({'type': 'done', 'session_id': new_session_id})}\n\n"
+        obj = json.loads(raw)
+        new_session_id = obj.get("session_id")
+
+        if obj.get("is_error"):
+            yield f"data: {json.dumps({'type': 'error', 'text': obj.get('result', 'unknown error')})}\n\n"
+            return
+
+        if new_session_id:
+            yield f"data: {json.dumps({'type': 'session', 'session_id': new_session_id})}\n\n"
+
+        text = obj.get("result", "")
+        if text:
+            yield f"data: {json.dumps({'type': 'delta', 'text': text}, ensure_ascii=False)}\n\n"
+
+        yield f"data: {json.dumps({'type': 'done', 'session_id': new_session_id})}\n\n"
 
     except Exception:
         logger.error(f"Agent error: {traceback.format_exc()}")
         yield f"data: {json.dumps({'type': 'error', 'text': 'Agent failed'})}\n\n"
-        return
-
-    return full_reply, new_session_id
 
 
 # --- Routes ---
 
 class ChatRequest(BaseModel):
     message: str
-    session_id: str | None = None
+    session_id: Optional[str] = None
 
 
 class TTSRequest(BaseModel):
@@ -115,14 +148,14 @@ async def health():
 
 
 @app.post("/v1/tts")
-async def tts_endpoint(request: TTSRequest, authorization: str | None = Header(None)):
+async def tts_endpoint(request: TTSRequest, authorization: Optional[str] = Header(None)):
     verify_token(authorization)
     audio = await synthesize_speech(strip_markdown_for_tts(request.text))
     return Response(content=audio, media_type="audio/mpeg")
 
 
 @app.post("/v1/chat")
-async def chat(req: ChatRequest, authorization: str | None = Header(None)):
+async def chat(req: ChatRequest, authorization: Optional[str] = Header(None)):
     """SSE stream: transcription → delta text → done."""
     verify_token(authorization)
 
@@ -135,8 +168,8 @@ async def chat(req: ChatRequest, authorization: str | None = Header(None)):
 @app.post("/v1/chat/voice")
 async def chat_voice(
     file: UploadFile = File(...),
-    session_id: str | None = None,
-    authorization: str | None = Header(None),
+    session_id: Optional[str] = None,
+    authorization: Optional[str] = Header(None),
 ):
     """Voice input → SSE stream with transcription + agent reply."""
     verify_token(authorization)
@@ -193,7 +226,7 @@ async def chat_voice(
 
 
 @app.get("/v1/notes")
-async def list_notes(path: str = "", authorization: str | None = Header(None)):
+async def list_notes(path: str = "", authorization: Optional[str] = Header(None)):
     """List markdown files under NOTES_ROOT/path."""
     verify_token(authorization)
     base = Path(NOTES_ROOT) / path
@@ -206,7 +239,7 @@ async def list_notes(path: str = "", authorization: str | None = Header(None)):
 
 
 @app.get("/v1/notes/read")
-async def read_note(path: str, authorization: str | None = Header(None)):
+async def read_note(path: str, authorization: Optional[str] = Header(None)):
     """Read a markdown file."""
     verify_token(authorization)
     target = Path(NOTES_ROOT) / path
@@ -218,6 +251,40 @@ async def read_note(path: str, authorization: str | None = Header(None)):
     except ValueError:
         raise HTTPException(status_code=403, detail="Access denied")
     return {"path": path, "content": target.read_text()}
+
+
+class ConvUpsert(BaseModel):
+    id: str
+    title: str
+    messages: list
+    updatedAt: int
+
+
+@app.get("/v1/conversations")
+async def list_conversations(authorization: Optional[str] = Header(None)):
+    verify_token(authorization)
+    convs = _load_convs()
+    # Return sorted newest first
+    items = sorted(convs.values(), key=lambda c: c.get("updatedAt", 0), reverse=True)
+    return {"conversations": items[:100]}
+
+
+@app.put("/v1/conversations/{conv_id}")
+async def upsert_conversation(conv_id: str, body: ConvUpsert, authorization: Optional[str] = Header(None)):
+    verify_token(authorization)
+    convs = _load_convs()
+    convs[conv_id] = body.model_dump()
+    _save_convs(convs)
+    return {"ok": True}
+
+
+@app.delete("/v1/conversations/{conv_id}")
+async def delete_conversation(conv_id: str, authorization: Optional[str] = Header(None)):
+    verify_token(authorization)
+    convs = _load_convs()
+    convs.pop(conv_id, None)
+    _save_convs(convs)
+    return {"ok": True}
 
 
 if __name__ == "__main__":

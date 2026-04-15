@@ -1,30 +1,88 @@
+/* Anthropic fonts — same CDN as claude.ai */
+@font-face {
+  font-family: "Anthropic Sans";
+  src: url(https://assets-proxy.anthropic.com/claude-ai/v2/assets/v1/cc27851ad-CFxw3nG7.woff2) format("woff2");
+  font-weight: 300 800;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Anthropic Sans";
+  src: url(https://assets-proxy.anthropic.com/claude-ai/v2/assets/v1/c9d3a3a49-BI1hrwN4.woff2) format("woff2");
+  font-weight: 300 800;
+  font-style: italic;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Anthropic Serif";
+  src: url(https://assets-proxy.anthropic.com/claude-ai/v2/assets/v1/c66fc489e-C-BHYa_K.woff2) format("woff2");
+  font-weight: 300 800;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Anthropic Serif";
+  src: url(https://assets-proxy.anthropic.com/claude-ai/v2/assets/v1/cc410af59-DH94ugQz.woff2) format("woff2");
+  font-weight: 300 800;
+  font-style: italic;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Anthropic Mono";
+  src: url(https://assets-proxy.anthropic.com/claude-ai/v2/assets/v1/c5dbe0935-B88FVziN.woff2) format("woff2");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
 :root {
-  --bg: #0a0a0a;
-  --bg2: #111;
-  --bg3: #1a1a1a;
-  --border: #222;
-  --text: #e0e0e0;
-  --text2: #666;
-  --accent: #fff;
-  font-size: 14px;
+  /* Dark theme — matches claude.ai [data-mode=dark] exactly */
+  --bg:      hsl(60 2.1% 18.4%);
+  --bg2:     hsl(60 2.7% 14.5%);
+  --bg3:     hsl(30 3.3% 11.8%);
+  --bg4:     hsl(60 2.6%  7.6%);
+  --border:  hsl(51 16.5% 84.5% / 12%);
+  --text:    hsl(48 33.3% 97.1%);
+  --text2:   hsl(50 9% 73.7%);
+  --text3:   hsl(48 4.8% 59.2%);
+  --accent:  hsl(15 63.1% 59.6%);
+
+  --font-sans:  "Anthropic Sans", system-ui, "Segoe UI", sans-serif;
+  --font-serif: "Anthropic Serif", Georgia, "Times New Roman", serif;
+  --font-mono:  "Anthropic Mono", ui-monospace, Consolas, monospace;
+
+  font-size: 16px;
+}
+
+/* Light theme — matches claude.ai [data-theme=claude][data-mode=light] */
+.app[data-theme="light"] {
+  --bg:      hsl(0 0% 100%);
+  --bg2:     hsl(48 33.3% 97.1%);
+  --bg3:     hsl(53 28.6% 94.5%);
+  --bg4:     hsl(220 14% 96%);
+  --border:  hsl(30 3.3% 11.8% / 12%);
+  --text:    hsl(60 2.6% 7.6%);
+  --text2:   hsl(60 2.5% 23.3%);
+  --text3:   hsl(51 3.1% 43.7%);
+  --accent:  hsl(15 63.1% 59.6%);
 }
 
 body {
-  background: var(--bg);
+  background: var(--bg4);
   color: var(--text);
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-family: var(--font-sans);
   line-height: 1.65;
   height: 100dvh;
   overflow: hidden;
+  transition: background 0.2s, color 0.2s;
 }
 
 #root { height: 100dvh; }
 
 ::-webkit-scrollbar { width: 4px; height: 4px; }
 ::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb { background: #2a2a2a; border-radius: 2px; }
+::-webkit-scrollbar-thumb { background: hsl(30 3.3% 20%); border-radius: 2px; }
 
-/* KaTeX */
-@import "katex/dist/katex.min.css";
+/* KaTeX — now imported via main.jsx to avoid @import-after-rules issue */

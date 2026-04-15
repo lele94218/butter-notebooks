@@ -1,27 +1,150 @@
-import { useState, useRef, useEffect, useCallback } from 'react'
+import { useState, useRef, useEffect, useCallback, useMemo, createContext, useContext } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkMath from 'remark-math'
+import remarkGfm from 'remark-gfm'
 import rehypeKatex from 'rehype-katex'
+import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter'
+import { oneDark, oneLight } from 'react-syntax-highlighter/dist/esm/styles/prism'
 import './App.css'
 
+const ThemeContext = createContext('dark')
+
 const API_BASE = import.meta.env.VITE_API_BASE || 'http://localhost:8765'
-const API_TOKEN = import.meta.env.VITE_API_TOKEN || ''
+const TOKEN_KEY = 'butter_auth_token'
 
-const headers = () => ({ Authorization: `Bearer ${API_TOKEN}` })
+const getToken = () => localStorage.getItem(TOKEN_KEY) || ''
+const headers = () => ({ Authorization: `Bearer ${getToken()}` })
+// VITE_API_TOKEN is only used to pre-fill the login input in dev — never auto-stores
 
-const mdComponents = {
-  code({ inline, className, children }) {
-    if (inline) return <code>{children}</code>
-    return <pre><code className={className}>{children}</code></pre>
+// ── Login screen ───────────────────────────────────────────
+function LoginScreen({ onAuth }) {
+  const [input, setInput] = useState(import.meta.env.VITE_API_TOKEN || '')
+  const [error, setError] = useState('')
+  const [loading, setLoading] = useState(false)
+
+  const submit = async (e) => {
+    e.preventDefault()
+    const token = input.trim()
+    if (!token) return
+    setLoading(true)
+    setError('')
+    try {
+      const res = await fetch(`${API_BASE}/health`, {
+        headers: { Authorization: `Bearer ${token}` }
+      })
+      if (res.ok) {
+        localStorage.setItem(TOKEN_KEY, token)
+        onAuth()
+      } else {
+        setError('Invalid token')
+      }
+    } catch {
+      setError('Cannot reach server')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  return (
+    <div className="login-screen">
+      <div className="login-box">
+        <h1>butter notebooks</h1>
+        <p>Enter your access token</p>
+        <form onSubmit={submit}>
+          <input
+            type="password"
+            className="login-input"
+            placeholder="Token"
+            value={input}
+            onChange={e => setInput(e.target.value)}
+            autoFocus
+          />
+          {error && <div className="login-error">{error}</div>}
+          <button type="submit" className="login-btn" disabled={!input.trim() || loading}>
+            {loading ? '…' : 'Enter'}
+          </button>
+        </form>
+      </div>
+    </div>
+  )
+}
+
+// ── Conversation API helpers ───────────────────────────────
+async function fetchConversations() {
+  const res = await fetch(`${API_BASE}/v1/conversations`, { headers: headers() })
+  if (!res.ok) return []
+  const d = await res.json()
+  return d.conversations || []
+}
+
+async function apiUpsertConv(conv) {
+  await fetch(`${API_BASE}/v1/conversations/${conv.id}`, {
+    method: 'PUT',
+    headers: { ...headers(), 'Content-Type': 'application/json' },
+    body: JSON.stringify(conv),
+  })
+}
+
+async function apiDeleteConv(id) {
+  await fetch(`${API_BASE}/v1/conversations/${id}`, {
+    method: 'DELETE',
+    headers: headers(),
+  })
+}
+
+// ── Markdown renderer ──────────────────────────────────────
+function makeMdComponents(theme) {
+  const base = theme === 'dark' ? oneDark : oneLight
+  const codeStyle = {
+    ...base,
+    'pre[class*="language-"]': {
+      ...base['pre[class*="language-"]'],
+      background: theme === 'dark' ? 'hsl(60 2.6% 7.6%)' : 'hsl(220 14% 96%)',
+      borderRadius: '10px',
+      border: theme === 'dark'
+        ? '0.5px solid hsl(51 16.5% 84.5% / 12%)'
+        : '0.5px solid hsl(220 14% 88%)',
+      padding: '14px 16px',
+      margin: 0,
+      fontSize: '12.5px',
+    },
+    'code[class*="language-"]': {
+      ...base['code[class*="language-"]'],
+      fontSize: '12.5px',
+      fontFamily: '"Anthropic Mono", ui-monospace, Consolas, monospace',
+      background: 'none',
+    },
+  }
+  return {
+    code({ className, children }) {
+      const match = /language-(\w+)/.exec(className || '')
+      const isBlock = !!match || String(children).includes('\n')
+      if (!isBlock) return <code>{children}</code>
+      const lang = match ? match[1] : ''
+      return (
+        <SyntaxHighlighter
+          style={codeStyle}
+          language={lang || 'text'}
+          PreTag="div"
+          customStyle={{ margin: 0 }}
+        >
+          {String(children).replace(/\n$/, '')}
+        </SyntaxHighlighter>
+      )
+    }
   }
 }
 
+const katexOptions = { throwOnError: false, strict: false }
+
 function MdMessage({ text, streaming }) {
+  const theme = useContext(ThemeContext)
+  const mdComponents = useMemo(() => makeMdComponents(theme), [theme])
   return (
-    <div className="msg-body">
+    <div className="prose">
       <ReactMarkdown
-        remarkPlugins={[remarkMath]}
-        rehypePlugins={[rehypeKatex]}
+        remarkPlugins={[remarkGfm, remarkMath]}
+        rehypePlugins={[[rehypeKatex, katexOptions]]}
         components={mdComponents}
       >
         {text}
@@ -32,13 +155,18 @@ function MdMessage({ text, streaming }) {
 }
 
 // ── Chat panel ─────────────────────────────────────────────
-function ChatPanel({ sessionId, onSessionId }) {
-  const [messages, setMessages] = useState([])
+function ChatPanel({ sessionId, onSessionId, initialMessages, onSaveConversation }) {
+  const [messages, setMessages] = useState(initialMessages || [])
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
   const [status, setStatus] = useState('')
   const bottomRef = useRef(null)
   const textareaRef = useRef(null)
+
+  // Sync when switching conversations
+  useEffect(() => {
+    setMessages(initialMessages || [])
+  }, [initialMessages])
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -50,12 +178,16 @@ function ChatPanel({ sessionId, onSessionId }) {
 
     setInput('')
     setLoading(true)
-    setStatus('thinking…')
-    textareaRef.current.style.height = 'auto'
+    setStatus('')
+    if (textareaRef.current) textareaRef.current.style.height = 'auto'
 
     const userMsg = { role: 'user', text }
     const assistantMsg = { role: 'assistant', text: '', streaming: true }
-    setMessages(prev => [...prev, userMsg, assistantMsg])
+
+    setMessages(prev => {
+      const next = [...prev, userMsg, assistantMsg]
+      return next
+    })
 
     try {
       const res = await fetch(`${API_BASE}/v1/chat`, {
@@ -67,6 +199,7 @@ function ChatPanel({ sessionId, onSessionId }) {
       const reader = res.body.getReader()
       const decoder = new TextDecoder()
       let buf = ''
+      let newSessionId = sessionId
 
       while (true) {
         const { done, value } = await reader.read()
@@ -82,6 +215,7 @@ function ChatPanel({ sessionId, onSessionId }) {
           try {
             const data = JSON.parse(payload)
             if (data.type === 'session') {
+              newSessionId = data.session_id
               onSessionId(data.session_id)
             } else if (data.type === 'delta') {
               setMessages(prev => {
@@ -94,9 +228,15 @@ function ChatPanel({ sessionId, onSessionId }) {
               })
               setStatus('')
             } else if (data.type === 'done') {
+              if (data.session_id) {
+                newSessionId = data.session_id
+                onSessionId(data.session_id)
+              }
               setMessages(prev => {
                 const msgs = [...prev]
                 msgs[msgs.length - 1] = { ...msgs[msgs.length - 1], streaming: false }
+                // Save after done
+                onSaveConversation(msgs, newSessionId, text)
                 return msgs
               })
             } else if (data.type === 'error') {
@@ -111,7 +251,7 @@ function ChatPanel({ sessionId, onSessionId }) {
       setLoading(false)
       setStatus('')
     }
-  }, [input, loading, sessionId, onSessionId])
+  }, [input, loading, sessionId, onSessionId, onSaveConversation])
 
   const onKeyDown = (e) => {
     if (e.key === 'Enter' && !e.shiftKey) {
@@ -138,7 +278,9 @@ function ChatPanel({ sessionId, onSessionId }) {
         {messages.map((msg, i) => (
           <div key={i} className={`message ${msg.role}`}>
             {msg.role === 'assistant'
-              ? <MdMessage text={msg.text} streaming={msg.streaming} />
+              ? msg.text === '' && msg.streaming
+                ? <div className="thinking-dots"><span/><span/><span/></div>
+                : <MdMessage text={msg.text} streaming={msg.streaming} />
               : <div className="msg-body">{msg.text}</div>
             }
           </div>
@@ -172,8 +314,99 @@ function ChatPanel({ sessionId, onSessionId }) {
   )
 }
 
+// ── File tree helpers ──────────────────────────────────────
+function buildTree(paths) {
+  const root = {}
+  for (const p of paths) {
+    const parts = p.split('/')
+    let node = root
+    for (let i = 0; i < parts.length - 1; i++) {
+      node[parts[i]] = node[parts[i]] || { __dir: true, __children: {} }
+      node = node[parts[i]].__children
+    }
+    node[parts[parts.length - 1]] = { __dir: false, __path: p }
+  }
+  return root
+}
+
+const IconFolderOpen = () => (
+  <svg width="14" height="14" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg" style={{flexShrink:0}}>
+    <path d="M1.5 3.5A1 1 0 0 1 2.5 2.5H6l1.5 1.5H13.5A1 1 0 0 1 14.5 5V12.5A1 1 0 0 1 13.5 13.5H2.5A1 1 0 0 1 1.5 12.5V3.5Z" fill="currentColor" fillOpacity="0.25" stroke="currentColor" strokeWidth="1" strokeLinejoin="round"/>
+    <path d="M1.5 6.5H14.5L13 12.5H3L1.5 6.5Z" fill="currentColor" fillOpacity="0.35" stroke="currentColor" strokeWidth="0.8" strokeLinejoin="round"/>
+  </svg>
+)
+
+const IconFolderClosed = () => (
+  <svg width="14" height="14" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg" style={{flexShrink:0}}>
+    <path d="M1.5 3.5A1 1 0 0 1 2.5 2.5H6l1.5 1.5H13.5A1 1 0 0 1 14.5 5V12.5A1 1 0 0 1 13.5 13.5H2.5A1 1 0 0 1 1.5 12.5V3.5Z" fill="currentColor" fillOpacity="0.2" stroke="currentColor" strokeWidth="1" strokeLinejoin="round"/>
+  </svg>
+)
+
+const IconFile = () => (
+  <svg width="12" height="12" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg" style={{flexShrink:0}}>
+    <path d="M3.5 1.5H9.5L12.5 4.5V14.5A0.5 0.5 0 0 1 12 15H4A0.5 0.5 0 0 1 3.5 14.5V1.5Z" fill="currentColor" fillOpacity="0.15" stroke="currentColor" strokeWidth="1" strokeLinejoin="round"/>
+    <path d="M9.5 1.5V4.5H12.5" stroke="currentColor" strokeWidth="1" strokeLinecap="round" strokeLinejoin="round"/>
+    <path d="M5.5 7.5H10.5M5.5 9.5H10.5M5.5 11.5H8.5" stroke="currentColor" strokeWidth="0.8" strokeLinecap="round"/>
+  </svg>
+)
+
+function FileTree({ tree, depth = 0, selectedNote, onSelect, openDirs, toggleDir }) {
+  return (
+    <>
+      {Object.entries(tree)
+        .sort(([a, av], [b, bv]) => {
+          if (av.__dir !== bv.__dir) return av.__dir ? -1 : 1
+          return a.localeCompare(b)
+        })
+        .map(([name, node]) => {
+          if (node.__dir) {
+            const key = name + depth
+            const open = openDirs[key] !== false
+            return (
+              <div key={key}>
+                <div
+                  className="tree-dir"
+                  style={{ paddingLeft: 8 + depth * 14 + 'px' }}
+                  onClick={() => toggleDir(key)}
+                >
+                  <span className="tree-arrow">{open ? '▾' : '▸'}</span>
+                  {open ? <IconFolderOpen /> : <IconFolderClosed />}
+                  <span className="tree-dir-name">{name}</span>
+                </div>
+                {open && (
+                  <FileTree
+                    tree={node.__children}
+                    depth={depth + 1}
+                    selectedNote={selectedNote}
+                    onSelect={onSelect}
+                    openDirs={openDirs}
+                    toggleDir={toggleDir}
+                  />
+                )}
+              </div>
+            )
+          }
+          return (
+            <div
+              key={node.__path}
+              className={`note-item tree-file ${selectedNote === node.__path ? 'active' : ''}`}
+              style={{ paddingLeft: 8 + depth * 14 + 'px' }}
+              title={node.__path}
+              onClick={() => onSelect(node.__path)}
+            >
+              <IconFile />
+              <span>{name.replace(/\.md$/, '')}</span>
+            </div>
+          )
+        })}
+    </>
+  )
+}
+
 // ── Notes panel ────────────────────────────────────────────
-function NotesPanel({ selectedNote, onSelectNote }) {
+function NotesPanel({ selectedNote }) {
+  const theme = useContext(ThemeContext)
+  const mdComponents = useMemo(() => makeMdComponents(theme), [theme])
   const [content, setContent] = useState('')
   const [loading, setLoading] = useState(false)
 
@@ -204,13 +437,15 @@ function NotesPanel({ selectedNote, onSelectNote }) {
         {loading ? (
           <p style={{ color: 'var(--text2)' }}>Loading…</p>
         ) : (
-          <ReactMarkdown
-            remarkPlugins={[remarkMath]}
-            rehypePlugins={[rehypeKatex]}
-            components={mdComponents}
-          >
-            {content}
-          </ReactMarkdown>
+          <div className="prose">
+            <ReactMarkdown
+              remarkPlugins={[remarkGfm, remarkMath]}
+              rehypePlugins={[[rehypeKatex, katexOptions]]}
+              components={mdComponents}
+            >
+              {content}
+            </ReactMarkdown>
+          </div>
         )}
       </div>
     </div>
@@ -219,42 +454,141 @@ function NotesPanel({ selectedNote, onSelectNote }) {
 
 // ── App ────────────────────────────────────────────────────
 export default function App() {
+  const [authed, setAuthed] = useState(() => !!getToken())
+  const [theme, setTheme] = useState(() => localStorage.getItem('butter_theme') || 'dark')
+  const toggleTheme = () => setTheme(t => {
+    const next = t === 'dark' ? 'light' : 'dark'
+    localStorage.setItem('butter_theme', next)
+    return next
+  })
+
   const [notes, setNotes] = useState([])
   const [selectedNote, setSelectedNote] = useState(null)
+  const [openDirs, setOpenDirs] = useState({})
   const [sessionId, setSessionId] = useState(null)
-  const [tab, setTab] = useState('chat') // 'chat' | 'notes'
+  const [tab, setTab] = useState('chat')
+  const [sidebarTab, setSidebarTab] = useState('chats') // 'chats' | 'notes'
+
+  // Conversation history
+  const [conversations, setConversations] = useState([])
+  const [activeConvId, setActiveConvId] = useState(null)
+  const [activeMessages, setActiveMessages] = useState([])
 
   useEffect(() => {
     fetch(`${API_BASE}/v1/notes`, { headers: headers() })
       .then(r => r.json())
       .then(d => setNotes(d.files || []))
       .catch(() => {})
+    fetchConversations().then(setConversations)
   }, [])
 
   const newChat = () => {
     setSessionId(null)
+    setActiveConvId(null)
+    setActiveMessages([])
     setTab('chat')
   }
 
+  const loadConversation = (conv) => {
+    setSessionId(conv.sessionId)
+    setActiveConvId(conv.id)
+    setActiveMessages(conv.messages)
+    setTab('chat')
+  }
+
+  const handleSaveConversation = useCallback((messages, sid, firstUserMsg) => {
+    setConversations(prev => {
+      const existingIdx = prev.findIndex(c => c.id === sid)
+      const title = firstUserMsg
+        ? firstUserMsg.slice(0, 48) + (firstUserMsg.length > 48 ? '…' : '')
+        : prev[existingIdx]?.title || 'New conversation'
+      const conv = { id: sid, title, messages, sessionId: sid, updatedAt: Date.now() }
+      apiUpsertConv(conv) // fire-and-forget
+      let next
+      if (existingIdx >= 0) {
+        next = [...prev]
+        next[existingIdx] = conv
+      } else {
+        next = [conv, ...prev]
+      }
+      if (next.length > 100) next = next.slice(0, 100)
+      return next
+    })
+    setActiveConvId(sid)
+    setActiveMessages(messages)
+  }, [])
+
+  const deleteConversation = (e, id) => {
+    e.stopPropagation()
+    apiDeleteConv(id) // fire-and-forget
+    setConversations(prev => prev.filter(c => c.id !== id))
+    if (activeConvId === id) newChat()
+  }
+
+  if (!authed) return <LoginScreen onAuth={() => setAuthed(true)} />
+
+  const logout = () => {
+    localStorage.removeItem(TOKEN_KEY)
+    setAuthed(false)
+  }
+
   return (
-    <div className="app">
+    <ThemeContext.Provider value={theme}>
+    <div className="app" data-theme={theme}>
       {/* Sidebar */}
       <div className="sidebar">
-        <div className="sidebar-header">butter notebooks</div>
-        <div className="notes-list">
-          {notes.map(f => (
-            <div
-              key={f}
-              className={`note-item ${selectedNote === f ? 'active' : ''}`}
-              title={f}
-              onClick={() => { setSelectedNote(f); setTab('notes') }}
-            >
-              {f.split('/').pop()}
-            </div>
-          ))}
+        <div className="sidebar-header">
+          <span>butter notebooks</span>
+          <div className="sidebar-tabs">
+            <button
+              className={`sidebar-tab ${sidebarTab === 'chats' ? 'active' : ''}`}
+              onClick={() => setSidebarTab('chats')}
+            >Chats</button>
+            <button
+              className={`sidebar-tab ${sidebarTab === 'notes' ? 'active' : ''}`}
+              onClick={() => setSidebarTab('notes')}
+            >Notes</button>
+          </div>
         </div>
+
+        <div className="notes-list">
+          {sidebarTab === 'chats' ? (
+            conversations.length === 0 ? (
+              <div className="sidebar-empty">No saved chats yet</div>
+            ) : (
+              conversations.map(conv => (
+                <div
+                  key={conv.id}
+                  className={`note-item conv-item ${activeConvId === conv.id ? 'active' : ''}`}
+                  onClick={() => loadConversation(conv)}
+                  title={conv.title}
+                >
+                  <span className="conv-title">{conv.title}</span>
+                  <button
+                    className="conv-delete"
+                    onClick={(e) => deleteConversation(e, conv.id)}
+                    title="Delete"
+                  >×</button>
+                </div>
+              ))
+            )
+          ) : (
+            <FileTree
+              tree={buildTree(notes)}
+              selectedNote={selectedNote}
+              onSelect={f => { setSelectedNote(f); setTab('notes') }}
+              openDirs={openDirs}
+              toggleDir={key => setOpenDirs(prev => ({ ...prev, [key]: prev[key] === false ? true : false }))}
+            />
+          )}
+        </div>
+
         <div className="sidebar-footer">
           <button className="new-chat-btn" onClick={newChat}>+ New chat</button>
+          <button className="theme-toggle" onClick={toggleTheme} title="Toggle theme">
+            {theme === 'dark' ? '☀' : '☾'}
+          </button>
+          <button className="theme-toggle" onClick={logout} title="Log out">⏏</button>
         </div>
       </div>
 
@@ -262,14 +596,21 @@ export default function App() {
       <div className="main">
         <div className="tab-bar">
           <div className={`tab ${tab === 'chat' ? 'active' : ''}`} onClick={() => setTab('chat')}>Chat</div>
-          <div className={`tab ${tab === 'notes' ? 'active' : ''}`} onClick={() => setTab('notes')}>Note</div>
+          <div className={`tab ${tab === 'notes' ? 'active' : ''}`} onClick={() => setTab('notes')}>Notes</div>
         </div>
 
         {tab === 'chat'
-          ? <ChatPanel sessionId={sessionId} onSessionId={setSessionId} />
-          : <NotesPanel selectedNote={selectedNote} onSelectNote={setSelectedNote} />
+          ? <ChatPanel
+              key={activeConvId || 'new'}
+              sessionId={sessionId}
+              onSessionId={setSessionId}
+              initialMessages={activeMessages}
+              onSaveConversation={handleSaveConversation}
+            />
+          : <NotesPanel selectedNote={selectedNote} />
         }
       </div>
     </div>
+    </ThemeContext.Provider>
   )
 }
