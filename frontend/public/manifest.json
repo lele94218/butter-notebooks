@@ -1,0 +1,18 @@
+{
+  "name": "butter notebooks",
+  "short_name": "butter",
+  "description": "AI-powered notebook with Claude",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#131310",
+  "theme_color": "#131310",
+  "orientation": "portrait-primary",
+  "icons": [
+    {
+      "src": "/favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

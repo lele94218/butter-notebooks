@@ -11,10 +11,14 @@ from pathlib import Path
 from typing import Optional
 
 from dotenv import load_dotenv
-from fastapi import FastAPI, File, Header, HTTPException, UploadFile
+from fastapi import FastAPI, File, Header, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response, StreamingResponse
 from pydantic import BaseModel
+from slowapi import Limiter
+from slowapi.util import get_remote_address
+from slowapi.errors import RateLimitExceeded
+from slowapi.middleware import SlowAPIMiddleware
 
 load_dotenv(override=True)
 
@@ -52,7 +56,12 @@ def verify_token(authorization: Optional[str]):
         raise HTTPException(status_code=403, detail="Invalid token")
 
 
+limiter = Limiter(key_func=get_remote_address)
+
 app = FastAPI(title="butter-notebooks")
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, lambda req, exc: Response("Too many requests", status_code=429))
+app.add_middleware(SlowAPIMiddleware)
 
 app.add_middleware(
     CORSMiddleware,
@@ -168,19 +177,22 @@ class TTSRequest(BaseModel):
 
 
 @app.get("/health")
-async def health():
+@limiter.limit("30/minute")
+async def health(request: Request):
     return {"status": "ok", "notes_root": NOTES_ROOT}
 
 
 @app.post("/v1/tts")
-async def tts_endpoint(request: TTSRequest, authorization: Optional[str] = Header(None)):
+@limiter.limit("20/minute")
+async def tts_endpoint(request: Request, body: TTSRequest, authorization: Optional[str] = Header(None)):
     verify_token(authorization)
-    audio = await synthesize_speech(strip_markdown_for_tts(request.text))
+    audio = await synthesize_speech(strip_markdown_for_tts(body.text))
     return Response(content=audio, media_type="audio/mpeg")
 
 
 @app.post("/v1/chat")
-async def chat(req: ChatRequest, authorization: Optional[str] = Header(None)):
+@limiter.limit("30/minute")
+async def chat(request: Request, req: ChatRequest, authorization: Optional[str] = Header(None)):
     """SSE stream: transcription → delta text → done."""
     verify_token(authorization)
 
@@ -251,7 +263,8 @@ async def chat_voice(
 
 
 @app.get("/v1/notes")
-async def list_notes(path: str = "", authorization: Optional[str] = Header(None)):
+@limiter.limit("60/minute")
+async def list_notes(request: Request, path: str = "", authorization: Optional[str] = Header(None)):
     """List markdown files under NOTES_ROOT/path."""
     verify_token(authorization)
     base = Path(NOTES_ROOT) / path
@@ -264,7 +277,8 @@ async def list_notes(path: str = "", authorization: Optional[str] = Header(None)
 
 
 @app.get("/v1/notes/read")
-async def read_note(path: str, authorization: Optional[str] = Header(None)):
+@limiter.limit("60/minute")
+async def read_note(request: Request, path: str = "", authorization: Optional[str] = Header(None)):
     """Read a markdown file."""
     verify_token(authorization)
     target = Path(NOTES_ROOT) / path
@@ -286,7 +300,8 @@ class ConvUpsert(BaseModel):
 
 
 @app.get("/v1/conversations")
-async def list_conversations(authorization: Optional[str] = Header(None)):
+@limiter.limit("60/minute")
+async def list_conversations(request: Request, authorization: Optional[str] = Header(None)):
     verify_token(authorization)
     convs = _load_convs()
     # Return sorted newest first
@@ -295,7 +310,8 @@ async def list_conversations(authorization: Optional[str] = Header(None)):
 
 
 @app.put("/v1/conversations/{conv_id}")
-async def upsert_conversation(conv_id: str, body: ConvUpsert, authorization: Optional[str] = Header(None)):
+@limiter.limit("60/minute")
+async def upsert_conversation(request: Request, conv_id: str, body: ConvUpsert, authorization: Optional[str] = Header(None)):
     verify_token(authorization)
     convs = _load_convs()
     convs[conv_id] = body.model_dump()
@@ -304,7 +320,8 @@ async def upsert_conversation(conv_id: str, body: ConvUpsert, authorization: Opt
 
 
 @app.delete("/v1/conversations/{conv_id}")
-async def delete_conversation(conv_id: str, authorization: Optional[str] = Header(None)):
+@limiter.limit("30/minute")
+async def delete_conversation(request: Request, conv_id: str, authorization: Optional[str] = Header(None)):
     verify_token(authorization)
     convs = _load_convs()
     convs.pop(conv_id, None)

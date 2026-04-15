@@ -69,6 +69,16 @@
   --accent:  hsl(15 63.1% 59.6%);
 }
 
+html {
+  /* Prevent black flash on iOS overscroll — dark theme default */
+  background: hsl(60 2.6% 7.6%);
+}
+html[data-theme="light"] {
+  /* Propagate light-mode bg vars to body (body can't inherit from .app child) */
+  --bg4: hsl(220 14% 96%);
+  background: hsl(220 14% 96%);
+}
+
 body {
   background: var(--bg4);
   color: var(--text);
@@ -77,9 +87,19 @@ body {
   height: 100dvh;
   overflow: hidden;
   transition: background 0.2s, color 0.2s;
+  /* Prevent iOS rubber-band scroll from exposing body */
+  overscroll-behavior: none;
+  /* Ensure body fills screen edge-to-edge on iOS */
+  position: fixed;
+  width: 100%;
+  top: 0;
+  left: 0;
 }
 
-#root { height: 100dvh; }
+#root {
+  height: 100dvh;
+  overflow: hidden;
+}
 
 ::-webkit-scrollbar { width: 4px; height: 4px; }
 ::-webkit-scrollbar-track { background: transparent; }

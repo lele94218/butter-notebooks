@@ -9,6 +9,13 @@ import './App.css'
 
 const ThemeContext = createContext('dark')
 
+const THEME_COLORS = { dark: '#2f2e2b', light: '#f5f3ee' }
+function applyThemeColor(theme) {
+  let meta = document.querySelector('meta[name="theme-color"]')
+  if (!meta) { meta = document.createElement('meta'); meta.name = 'theme-color'; document.head.appendChild(meta) }
+  meta.content = THEME_COLORS[theme] || THEME_COLORS.dark
+}
+
 const API_BASE = import.meta.env.VITE_API_BASE || 'http://localhost:8765'
 const TOKEN_KEY = 'butter_auth_token'
 
@@ -131,7 +138,10 @@ function makeMdComponents(theme) {
           {String(children).replace(/\n$/, '')}
         </SyntaxHighlighter>
       )
-    }
+    },
+    table({ children }) {
+      return <div className="table-scroll"><table>{children}</table></div>
+    },
   }
 }
 
@@ -149,7 +159,6 @@ function MdMessage({ text, streaming }) {
       >
         {text}
       </ReactMarkdown>
-      {streaming && <span className="cursor" />}
     </div>
   )
 }
@@ -157,11 +166,15 @@ function MdMessage({ text, streaming }) {
 // ── Chat panel ─────────────────────────────────────────────
 function ChatPanel({ sessionId, onSessionId, initialMessages, onSaveConversation }) {
   const [messages, setMessages] = useState(initialMessages || [])
+  const messagesRef = useRef(messages)
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
   const [status, setStatus] = useState('')
   const bottomRef = useRef(null)
   const textareaRef = useRef(null)
+
+  // Keep ref in sync so done handler can read latest messages without stale closure
+  useEffect(() => { messagesRef.current = messages }, [messages])
 
   // Sync when switching conversations
   useEffect(() => {
@@ -232,13 +245,13 @@ function ChatPanel({ sessionId, onSessionId, initialMessages, onSaveConversation
                 newSessionId = data.session_id
                 onSessionId(data.session_id)
               }
-              setMessages(prev => {
-                const msgs = [...prev]
-                msgs[msgs.length - 1] = { ...msgs[msgs.length - 1], streaming: false }
-                // Save after done
-                onSaveConversation(msgs, newSessionId, text)
-                return msgs
-              })
+              // Build final messages (streaming: false) directly — don't read from ref
+              // which is still stale at this point (React hasn't re-rendered yet)
+              const finalMsgs = messagesRef.current.map((m, i) =>
+                i === messagesRef.current.length - 1 ? { ...m, streaming: false } : m
+              )
+              setMessages(finalMsgs)
+              onSaveConversation(finalMsgs, newSessionId, text, sessionId)
             } else if (data.type === 'error') {
               setStatus(`error: ${data.text}`)
             }
@@ -455,10 +468,17 @@ function NotesPanel({ selectedNote }) {
 // ── App ────────────────────────────────────────────────────
 export default function App() {
   const [authed, setAuthed] = useState(() => !!getToken())
-  const [theme, setTheme] = useState(() => localStorage.getItem('butter_theme') || 'dark')
+  const [theme, setTheme] = useState(() => {
+    const saved = localStorage.getItem('butter_theme') || 'dark'
+    document.documentElement.dataset.theme = saved
+    applyThemeColor(saved)
+    return saved
+  })
   const toggleTheme = () => setTheme(t => {
     const next = t === 'dark' ? 'light' : 'dark'
     localStorage.setItem('butter_theme', next)
+    document.documentElement.dataset.theme = next
+    applyThemeColor(next)
     return next
   })
 
@@ -468,17 +488,22 @@ export default function App() {
   const [sessionId, setSessionId] = useState(null)
   const [tab, setTab] = useState('chat')
   const [sidebarTab, setSidebarTab] = useState('chats') // 'chats' | 'notes'
+  const [sidebarOpen, setSidebarOpen] = useState(false)
 
   // Conversation history
   const [conversations, setConversations] = useState([])
   const [activeConvId, setActiveConvId] = useState(null)
   const [activeMessages, setActiveMessages] = useState([])
 
-  useEffect(() => {
+  const refreshNotes = useCallback(() => {
     fetch(`${API_BASE}/v1/notes`, { headers: headers() })
       .then(r => r.json())
       .then(d => setNotes(d.files || []))
       .catch(() => {})
+  }, [])
+
+  useEffect(() => {
+    refreshNotes()
     fetchConversations().then(setConversations)
   }, [])
 
@@ -496,12 +521,14 @@ export default function App() {
     setTab('chat')
   }
 
-  const handleSaveConversation = useCallback((messages, sid, firstUserMsg) => {
+  const handleSaveConversation = useCallback((messages, sid, firstUserMsg, prevSid) => {
     setConversations(prev => {
-      const existingIdx = prev.findIndex(c => c.id === sid)
-      const title = firstUserMsg
-        ? firstUserMsg.slice(0, 48) + (firstUserMsg.length > 48 ? '…' : '')
-        : prev[existingIdx]?.title || 'New conversation'
+      // Match by new sid OR old sid (claude --resume may return a new session_id)
+      const existingIdx = prev.findIndex(c => c.id === sid || (prevSid && c.id === prevSid))
+      // Only use firstUserMsg as title when creating a new conversation
+      const title = existingIdx >= 0
+        ? prev[existingIdx].title
+        : (firstUserMsg ? firstUserMsg.slice(0, 48) + (firstUserMsg.length > 48 ? '…' : '') : 'New conversation')
       const conv = { id: sid, title, messages, sessionId: sid, updatedAt: Date.now() }
       apiUpsertConv(conv) // fire-and-forget
       let next
@@ -535,10 +562,14 @@ export default function App() {
   return (
     <ThemeContext.Provider value={theme}>
     <div className="app" data-theme={theme}>
+      {/* Mobile overlay backdrop */}
+      {sidebarOpen && <div className="sidebar-backdrop" onClick={() => setSidebarOpen(false)} />}
+
       {/* Sidebar */}
-      <div className="sidebar">
+      <div className={`sidebar ${sidebarOpen ? 'sidebar--open' : ''}`}>
         <div className="sidebar-header">
           <span>butter notebooks</span>
+          <button className="sidebar-close-btn" onClick={() => setSidebarOpen(false)}>✕</button>
           <div className="sidebar-tabs">
             <button
               className={`sidebar-tab ${sidebarTab === 'chats' ? 'active' : ''}`}
@@ -548,6 +579,9 @@ export default function App() {
               className={`sidebar-tab ${sidebarTab === 'notes' ? 'active' : ''}`}
               onClick={() => setSidebarTab('notes')}
             >Notes</button>
+            {sidebarTab === 'notes' && (
+              <button className="refresh-notes-btn" onClick={refreshNotes} title="Refresh notes">↺</button>
+            )}
           </div>
         </div>
 
@@ -560,7 +594,7 @@ export default function App() {
                 <div
                   key={conv.id}
                   className={`note-item conv-item ${activeConvId === conv.id ? 'active' : ''}`}
-                  onClick={() => loadConversation(conv)}
+                  onClick={() => { loadConversation(conv); setSidebarOpen(false) }}
                   title={conv.title}
                 >
                   <span className="conv-title">{conv.title}</span>
@@ -576,7 +610,7 @@ export default function App() {
             <FileTree
               tree={buildTree(notes)}
               selectedNote={selectedNote}
-              onSelect={f => { setSelectedNote(f); setTab('notes') }}
+              onSelect={f => { setSelectedNote(f); setTab('notes'); setSidebarOpen(false) }}
               openDirs={openDirs}
               toggleDir={key => setOpenDirs(prev => ({ ...prev, [key]: prev[key] === false ? true : false }))}
             />
@@ -595,6 +629,7 @@ export default function App() {
       {/* Main */}
       <div className="main">
         <div className="tab-bar">
+          <button className="menu-btn" onClick={() => setSidebarOpen(o => !o)}>☰</button>
           <div className={`tab ${tab === 'chat' ? 'active' : ''}`} onClick={() => setTab('chat')}>Chat</div>
           <div className={`tab ${tab === 'notes' ? 'active' : ''}`} onClick={() => setTab('notes')}>Notes</div>
         </div>
