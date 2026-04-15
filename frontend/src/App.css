@@ -1,6 +1,6 @@
 .app {
   display: flex;
-  height: 100dvh;
+  height: calc(100dvh - var(--keyboard-offset, 0px));
   overflow: hidden;
   background: var(--bg4);
   transition: background 0.2s, color 0.2s;
