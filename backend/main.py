@@ -76,10 +76,11 @@ CLAUDE_SYSTEM_PROMPT = (
 
 # --- Agent chat via claude CLI ---
 async def run_agent_stream(prompt: str, session_id: Optional[str] = None):
-    """Run `claude -p --output-format json`, read result from stderr, yield SSE."""
+    """Run `claude -p --output-format stream-json`, read events line-by-line, yield SSE."""
     cmd = [
         CLAUDE_BIN, "-p",
-        "--output-format", "json",
+        "--output-format", "stream-json",
+        "--verbose",
         "--allowed-tools", CLAUDE_ALLOWED_TOOLS,
         "--permission-mode", "acceptEdits",
         "--dangerously-skip-permissions",
@@ -104,26 +105,50 @@ async def run_agent_stream(prompt: str, session_id: Optional[str] = None):
         yield f"data: {json.dumps({'type': 'error', 'text': str(e)})}\n\n"
         return
 
+    new_session_id = session_id
+    buf = b""
+
     try:
-        # json mode: full result arrives on stderr as a single JSON line
-        stdout_data, stderr_data = await proc.communicate()
-        raw = (stderr_data or stdout_data or b"").decode("utf-8", errors="replace").strip()
-        logger.info(f"claude raw output ({len(raw)} bytes): {raw[:200]}")
+        # stream-json: stdout emits one JSON object per line
+        async for line in proc.stdout:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                obj = json.loads(line)
+            except Exception:
+                continue
 
-        obj = json.loads(raw)
-        new_session_id = obj.get("session_id")
+            event_type = obj.get("type")
 
-        if obj.get("is_error"):
-            yield f"data: {json.dumps({'type': 'error', 'text': obj.get('result', 'unknown error')})}\n\n"
-            return
+            if event_type == "system":
+                # init event carries session_id
+                sid = obj.get("session_id")
+                if sid:
+                    new_session_id = sid
+                    yield f"data: {json.dumps({'type': 'session', 'session_id': sid})}\n\n"
 
-        if new_session_id:
-            yield f"data: {json.dumps({'type': 'session', 'session_id': new_session_id})}\n\n"
+            elif event_type == "assistant":
+                # assistant message — extract text content blocks
+                msg = obj.get("message", {})
+                for block in msg.get("content", []):
+                    if block.get("type") == "text":
+                        text = block.get("text", "")
+                        if text:
+                            yield f"data: {json.dumps({'type': 'delta', 'text': text}, ensure_ascii=False)}\n\n"
 
-        text = obj.get("result", "")
-        if text:
-            yield f"data: {json.dumps({'type': 'delta', 'text': text}, ensure_ascii=False)}\n\n"
+            elif event_type == "result":
+                sid = obj.get("session_id")
+                if sid:
+                    new_session_id = sid
+                if obj.get("is_error"):
+                    yield f"data: {json.dumps({'type': 'error', 'text': obj.get('result', 'unknown error')})}\n\n"
+                    return
+                yield f"data: {json.dumps({'type': 'done', 'session_id': new_session_id})}\n\n"
+                return
 
+        # If we reach here without a result event, send done anyway
+        await proc.wait()
         yield f"data: {json.dumps({'type': 'done', 'session_id': new_session_id})}\n\n"
 
     except Exception:
