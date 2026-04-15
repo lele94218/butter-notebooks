@@ -140,18 +140,43 @@ async def run_agent_stream(prompt: str, session_id: Optional[str] = None):
             elif event_type == "assistant":
                 # assistant message — extract text content blocks
                 msg = obj.get("message", {})
-                for block in msg.get("content", []):
+                blocks = msg.get("content", [])
+                block_types = [b.get("type") for b in blocks]
+                tool_names = [b.get("name") for b in blocks if b.get("type") == "tool_use"]
+                if tool_names:
+                    logger.info(f"[assistant] tool_use: {tool_names}")
+                has_text = False
+                for block in blocks:
                     if block.get("type") == "text":
                         text = block.get("text", "")
                         if text:
+                            has_text = True
                             yield f"data: {json.dumps({'type': 'delta', 'text': text}, ensure_ascii=False)}\n\n"
+                    elif block.get("type") == "thinking":
+                        thinking = block.get("thinking", "")
+                        if thinking:
+                            yield f"data: {json.dumps({'type': 'thinking', 'text': thinking}, ensure_ascii=False)}\n\n"
+                if not has_text:
+                    logger.info(f"[assistant] no text, blocks={block_types}")
 
             elif event_type == "result":
                 sid = obj.get("session_id")
                 if sid:
                     new_session_id = sid
-                if obj.get("is_error"):
-                    yield f"data: {json.dumps({'type': 'error', 'text': obj.get('result', 'unknown error')})}\n\n"
+                is_error = obj.get("is_error", False)
+                stop_reason = obj.get("stop_reason", "unknown")
+                denials = obj.get("permission_denials") or []
+                cost = obj.get("total_cost_usd")
+                logger.info(
+                    f"[result] is_error={is_error} stop_reason={stop_reason} "
+                    f"permission_denials={len(denials)} cost_usd={cost}"
+                )
+                if denials:
+                    logger.warning(f"[result] denied tools: {[d.get('toolName') for d in denials]}")
+                if is_error:
+                    err_text = obj.get("result", "unknown error")
+                    logger.error(f"[result] error text: {err_text}")
+                    yield f"data: {json.dumps({'type': 'error', 'text': err_text})}\n\n"
                     return
                 yield f"data: {json.dumps({'type': 'done', 'session_id': new_session_id})}\n\n"
                 return
@@ -297,6 +322,7 @@ class ConvUpsert(BaseModel):
     title: str
     messages: list
     updatedAt: int
+    sessionId: Optional[str] = None
 
 
 @app.get("/v1/conversations")

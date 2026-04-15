@@ -195,7 +195,7 @@ function ChatPanel({ sessionId, onSessionId, convId, initialMessages, onSaveConv
     if (textareaRef.current) textareaRef.current.style.height = 'auto'
 
     const userMsg = { role: 'user', text }
-    const assistantMsg = { role: 'assistant', text: '', streaming: true }
+    const assistantMsg = { role: 'assistant', text: '', thinking: '', streaming: true }
 
     setMessages(prev => {
       const next = [...prev, userMsg, assistantMsg]
@@ -230,6 +230,15 @@ function ChatPanel({ sessionId, onSessionId, convId, initialMessages, onSaveConv
             if (data.type === 'session') {
               newSessionId = data.session_id
               onSessionId(data.session_id)
+            } else if (data.type === 'thinking') {
+              setMessages(prev => {
+                const msgs = [...prev]
+                msgs[msgs.length - 1] = {
+                  ...msgs[msgs.length - 1],
+                  thinking: (msgs[msgs.length - 1].thinking || '') + data.text,
+                }
+                return msgs
+              })
             } else if (data.type === 'delta') {
               setMessages(prev => {
                 const msgs = [...prev]
@@ -245,13 +254,15 @@ function ChatPanel({ sessionId, onSessionId, convId, initialMessages, onSaveConv
                 newSessionId = data.session_id
                 onSessionId(data.session_id)
               }
-              // Build final messages (streaming: false) directly — don't read from ref
-              // which is still stale at this point (React hasn't re-rendered yet)
-              const finalMsgs = messagesRef.current.map((m, i) =>
-                i === messagesRef.current.length - 1 ? { ...m, streaming: false } : m
-              )
-              setMessages(finalMsgs)
-              onSaveConversation(finalMsgs, newSessionId, text, convId)
+              // Use functional setState to get correct accumulated state —
+              // messagesRef may be stale if React batched all delta setStates together
+              setMessages(prev => {
+                const finalMsgs = prev.map((m, i) =>
+                  i === prev.length - 1 ? { ...m, streaming: false } : m
+                )
+                onSaveConversation(finalMsgs, newSessionId, text, convId)
+                return finalMsgs
+              })
             } else if (data.type === 'error') {
               setStatus(`error: ${data.text}`)
             }
@@ -290,12 +301,19 @@ function ChatPanel({ sessionId, onSessionId, convId, initialMessages, onSaveConv
         )}
         {messages.map((msg, i) => (
           <div key={i} className={`message ${msg.role}`}>
-            {msg.role === 'assistant'
-              ? msg.text === '' && msg.streaming
-                ? <div className="thinking-dots"><span/><span/><span/></div>
-                : <MdMessage text={msg.text} streaming={msg.streaming} />
-              : <div className="msg-body">{msg.text}</div>
-            }
+            {msg.role === 'assistant' ? (
+              <>
+                {msg.thinking ? <div className="msg-thinking">{msg.thinking}</div> : null}
+                {msg.text === '' && msg.streaming
+                  ? <div className="thinking-dots"><span/><span/><span/></div>
+                  : msg.text === '' && !msg.streaming && !msg.thinking
+                    ? <div className="msg-empty">（无回复）</div>
+                    : msg.text
+                      ? <MdMessage text={msg.text} streaming={msg.streaming} />
+                      : null
+                }
+              </>
+            ) : <div className="msg-body">{msg.text}</div>}
           </div>
         ))}
         <div ref={bottomRef} />

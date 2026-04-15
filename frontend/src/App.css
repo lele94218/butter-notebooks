@@ -457,6 +457,21 @@
 
 /* KaTeX in note viewer — inherits .prose rules, no extra overrides needed */
 
+/* ── Thinking block ── */
+.msg-thinking {
+  font-size: 0.78em;
+  line-height: 1.5;
+  color: var(--text2);
+  background: var(--bg2);
+  border-left: 3px solid var(--text2);
+  border-radius: 4px;
+  padding: 6px 10px;
+  margin-bottom: 8px;
+  white-space: pre-wrap;
+  word-break: break-word;
+  opacity: 0.75;
+}
+
 /* ── Thinking dots ── */
 .thinking-dots {
   display: flex;
