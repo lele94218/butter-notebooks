@@ -1,0 +1,8 @@
+fastapi
+uvicorn[standard]
+python-dotenv
+httpx
+edge-tts
+claude-agent-sdk
+pydantic
+python-multipart
