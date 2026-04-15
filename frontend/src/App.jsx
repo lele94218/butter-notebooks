@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect, useCallback, useMemo, createContext, useContext } from 'react'
 import MonacoEditor from '@monaco-editor/react'
+import { initVimMode } from 'monaco-vim'
 import ReactMarkdown from 'react-markdown'
 import remarkMath from 'remark-math'
 import remarkGfm from 'remark-gfm'
@@ -494,7 +495,10 @@ function CodePanel() {
   const [output, setOutput] = useState([])          // [{type, text/data}]
   const [running, setRunning] = useState(false)
   const [saving, setSaving] = useState(false)
+  const [vimMode, setVimMode] = useState(false)
   const sessionId = useRef('code-' + Math.random().toString(36).slice(2))
+  const vimRef = useRef(null)
+  const editorRef = useRef(null)
 
   const loadDir = useCallback((path) => {
     fetch(`${API_BASE}/v1/files?path=${encodeURIComponent(path)}`, { headers: headers() })
@@ -604,6 +608,22 @@ function CodePanel() {
           <button className="code-btn code-reset-btn" onClick={resetKernel} title="Reset kernel (clear variables)">
             ↺ Reset
           </button>
+          <button
+            className={`code-btn code-vim-btn ${vimMode ? 'active' : ''}`}
+            onClick={() => {
+              if (vimMode) {
+                vimRef.current?.dispose()
+                vimRef.current = null
+                setVimMode(false)
+              } else if (editorRef.current) {
+                vimRef.current = initVimMode(editorRef.current)
+                setVimMode(true)
+              }
+            }}
+            title="Toggle Vim mode"
+          >
+            VIM
+          </button>
         </div>
 
         <div className="code-editor-wrap">
@@ -613,6 +633,7 @@ function CodePanel() {
             theme={theme === 'dark' ? 'vs-dark' : 'light'}
             value={code}
             onChange={v => setCode(v || '')}
+            onMount={editor => { editorRef.current = editor }}
             options={{
               fontSize: 13,
               minimap: { enabled: false },

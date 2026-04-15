@@ -572,6 +572,7 @@
 .code-btn:disabled { opacity: 0.4; cursor: not-allowed; }
 .code-run-btn { background: var(--accent); color: #fff; border-color: var(--accent); }
 .code-run-btn:hover { opacity: 0.85; }
+.code-vim-btn.active { background: #e5c07b; color: #282c34; border-color: #e5c07b; font-weight: 600; }
 
 .code-editor-wrap {
   flex: 1;
