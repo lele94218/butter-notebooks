@@ -46,10 +46,18 @@ SANDBOX_PYTHON=/Users/you/works/ComfyUI/venv/bin/python3
 ### Notes
 
 - Must use `--loop asyncio` (uvloop hangs under launchd)
-- Homebrew `Python.app` needs Full Disk Access (FDA) in System Settings for iCloud Drive access:
+- Homebrew `Python.app` needs **Full Disk Access** (FDA) in System Settings > Privacy & Security for iCloud Drive access:
   `/opt/homebrew/Cellar/python@3.13/3.13.12_1/Frameworks/Python.framework/Versions/3.13/Resources/Python.app`
+  (If Python version upgrades, Cellar path changes — re-grant FDA)
 - Backend venv uses Homebrew Python 3.13: `backend/.venv`
-- Code sandbox uses ComfyUI venv (has torch/numpy/matplotlib)
+- Code sandbox uses ComfyUI venv (has torch 2.10.0 / numpy / matplotlib): `SANDBOX_PYTHON` env var
+- File scan for notes uses `subprocess find` (not `rglob`) to avoid blocking asyncio event loop under launchd TCC restrictions
+
+## Known Issues / Gotchas
+
+- **iOS scroll on notes**: Only `.note-panel` should be a scroll container. Inner elements (`.prose` etc.) must have `overflow: visible`, not `overflow: hidden/auto`, or iOS creates a second scroll context that blocks touch events.
+- **Claude session_id vs convId**: Claude CLI returns a new `session_id` on every `--resume` call. Frontend keeps a stable `convId` (UUID) separate from `sessionId` (for `--resume` only). Don't conflate them.
+- **Extended thinking**: Claude thinking blocks come as `type: 'thinking'` SSE events, not `delta`. Frontend renders them as a dimmed block above the response.
 
 ## Development
 
