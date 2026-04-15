@@ -164,7 +164,7 @@ function MdMessage({ text, streaming }) {
 }
 
 // ── Chat panel ─────────────────────────────────────────────
-function ChatPanel({ sessionId, onSessionId, initialMessages, onSaveConversation }) {
+function ChatPanel({ sessionId, onSessionId, convId, initialMessages, onSaveConversation }) {
   const [messages, setMessages] = useState(initialMessages || [])
   const messagesRef = useRef(messages)
   const [input, setInput] = useState('')
@@ -251,7 +251,7 @@ function ChatPanel({ sessionId, onSessionId, initialMessages, onSaveConversation
                 i === messagesRef.current.length - 1 ? { ...m, streaming: false } : m
               )
               setMessages(finalMsgs)
-              onSaveConversation(finalMsgs, newSessionId, text, sessionId)
+              onSaveConversation(finalMsgs, newSessionId, text, convId)
             } else if (data.type === 'error') {
               setStatus(`error: ${data.text}`)
             }
@@ -485,7 +485,8 @@ export default function App() {
   const [notes, setNotes] = useState([])
   const [selectedNote, setSelectedNote] = useState(null)
   const [openDirs, setOpenDirs] = useState({})
-  const [sessionId, setSessionId] = useState(null)
+  const [sessionId, setSessionId] = useState(null)   // Claude session_id — for --resume only
+  const [convId, setConvId] = useState(null)          // our stable conversation UUID
   const [tab, setTab] = useState('chat')
   const [sidebarTab, setSidebarTab] = useState('chats') // 'chats' | 'notes'
   const [sidebarOpen, setSidebarOpen] = useState(false)
@@ -509,28 +510,31 @@ export default function App() {
 
   const newChat = () => {
     setSessionId(null)
+    setConvId(null)
     setActiveConvId(null)
     setActiveMessages([])
     setTab('chat')
   }
 
   const loadConversation = (conv) => {
-    setSessionId(conv.sessionId)
+    setSessionId(conv.sessionId)   // Claude session_id for --resume
+    setConvId(conv.id)             // our stable UUID
     setActiveConvId(conv.id)
     setActiveMessages(conv.messages)
     setTab('chat')
   }
 
-  const handleSaveConversation = useCallback((messages, sid, firstUserMsg, prevSid) => {
+  const handleSaveConversation = useCallback((messages, claudeSid, firstUserMsg, stableConvId) => {
+    // stableConvId: our UUID (null if first message in new chat)
+    const id = stableConvId || claudeSid  // first message: use claudeSid as initial id
     setConversations(prev => {
-      // Match by new sid OR old sid (claude --resume may return a new session_id)
-      const existingIdx = prev.findIndex(c => c.id === sid || (prevSid && c.id === prevSid))
-      // Only use firstUserMsg as title when creating a new conversation
+      const existingIdx = prev.findIndex(c => c.id === id)
       const title = existingIdx >= 0
         ? prev[existingIdx].title
         : (firstUserMsg ? firstUserMsg.slice(0, 48) + (firstUserMsg.length > 48 ? '…' : '') : 'New conversation')
-      const conv = { id: sid, title, messages, sessionId: sid, updatedAt: Date.now() }
-      apiUpsertConv(conv) // fire-and-forget
+      // Keep our stable id, update sessionId to latest claude session_id for --resume
+      const conv = { id, title, messages, sessionId: claudeSid, updatedAt: Date.now() }
+      apiUpsertConv(conv)
       let next
       if (existingIdx >= 0) {
         next = [...prev]
@@ -541,7 +545,8 @@ export default function App() {
       if (next.length > 100) next = next.slice(0, 100)
       return next
     })
-    setActiveConvId(sid)
+    setConvId(id)
+    setActiveConvId(id)
     setActiveMessages(messages)
   }, [])
 
@@ -639,6 +644,7 @@ export default function App() {
               key={activeConvId || 'new'}
               sessionId={sessionId}
               onSessionId={setSessionId}
+              convId={convId}
               initialMessages={activeMessages}
               onSaveConversation={handleSaveConversation}
             />
