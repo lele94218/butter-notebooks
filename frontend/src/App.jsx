@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect, useCallback, useMemo, createContext, useContext } from 'react'
+import MonacoEditor from '@monaco-editor/react'
 import ReactMarkdown from 'react-markdown'
 import remarkMath from 'remark-math'
 import remarkGfm from 'remark-gfm'
@@ -483,6 +484,166 @@ function NotesPanel({ selectedNote }) {
   )
 }
 
+// ── Code Panel ─────────────────────────────────────────────
+function CodePanel() {
+  const theme = useContext(ThemeContext)
+  const [entries, setEntries] = useState([])
+  const [dirPath, setDirPath] = useState('')
+  const [openFile, setOpenFile] = useState(null)   // { path, name }
+  const [code, setCode] = useState('')
+  const [output, setOutput] = useState([])          // [{type, text/data}]
+  const [running, setRunning] = useState(false)
+  const [saving, setSaving] = useState(false)
+  const sessionId = useRef('code-' + Math.random().toString(36).slice(2))
+
+  const loadDir = useCallback((path) => {
+    fetch(`${API_BASE}/v1/files?path=${encodeURIComponent(path)}`, { headers: headers() })
+      .then(r => r.json())
+      .then(d => { setEntries(d.entries || []); setDirPath(path) })
+      .catch(() => {})
+  }, [])
+
+  useEffect(() => { loadDir('') }, [])
+
+  const openFileEntry = (entry) => {
+    if (entry.is_dir) { loadDir(entry.path); return }
+    fetch(`${API_BASE}/v1/files/read?path=${encodeURIComponent(entry.path)}`, { headers: headers() })
+      .then(r => r.json())
+      .then(d => { setOpenFile(entry); setCode(d.content || ''); setOutput([]) })
+  }
+
+  const saveFile = async () => {
+    if (!openFile) return
+    setSaving(true)
+    await fetch(`${API_BASE}/v1/files/write`, {
+      method: 'PUT',
+      headers: { ...headers(), 'Content-Type': 'application/json' },
+      body: JSON.stringify({ path: openFile.path, content: code }),
+    }).catch(() => {})
+    setSaving(false)
+  }
+
+  const runCode = async () => {
+    setRunning(true)
+    setOutput([])
+    try {
+      const res = await fetch(`${API_BASE}/v1/execute`, {
+        method: 'POST',
+        headers: { ...headers(), 'Content-Type': 'application/json' },
+        body: JSON.stringify({ code, session_id: sessionId.current }),
+      })
+      const reader = res.body.getReader()
+      const decoder = new TextDecoder()
+      let buf = ''
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+        buf += decoder.decode(value, { stream: true })
+        const lines = buf.split('\n')
+        buf = lines.pop()
+        for (const line of lines) {
+          if (!line.startsWith('data: ')) continue
+          try {
+            const ev = JSON.parse(line.slice(6))
+            if (ev.type !== 'done') setOutput(prev => [...prev, ev])
+          } catch {}
+        }
+      }
+    } catch (e) {
+      setOutput(prev => [...prev, { type: 'stderr', text: String(e) }])
+    }
+    setRunning(false)
+  }
+
+  const resetKernel = async () => {
+    await fetch(`${API_BASE}/v1/kernel/reset?session_id=${sessionId.current}`, {
+      method: 'POST', headers: headers(),
+    })
+    setOutput([{ type: 'stdout', text: '✓ Kernel reset\n' }])
+  }
+
+  const goUp = () => {
+    const parts = dirPath.split('/').filter(Boolean)
+    parts.pop()
+    loadDir(parts.join('/'))
+  }
+
+  return (
+    <div className="code-panel">
+      {/* File tree */}
+      <div className="code-filetree">
+        <div className="code-filetree-header">
+          {dirPath && <button className="code-up-btn" onClick={goUp} title="Up">‹</button>}
+          <span className="code-dir-label">{dirPath || '/'}</span>
+          <button className="code-refresh-btn" onClick={() => loadDir(dirPath)} title="Refresh">↺</button>
+        </div>
+        <div className="code-filetree-list">
+          {entries.map(e => (
+            <div
+              key={e.path}
+              className={`code-file-item ${openFile?.path === e.path ? 'active' : ''} ${e.is_dir ? 'is-dir' : ''}`}
+              onClick={() => openFileEntry(e)}
+            >
+              <span className="code-file-icon">{e.is_dir ? '📁' : '📄'}</span>
+              <span className="code-file-name">{e.name}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* Editor + output */}
+      <div className="code-main">
+        <div className="code-toolbar">
+          <span className="code-filename">{openFile ? openFile.path : '—'}</span>
+          <button className="code-btn code-run-btn" onClick={runCode} disabled={running}>
+            {running ? '⏳' : '▶ Run'}
+          </button>
+          <button className="code-btn code-save-btn" onClick={saveFile} disabled={!openFile || saving}>
+            {saving ? '…' : '💾 Save'}
+          </button>
+          <button className="code-btn code-reset-btn" onClick={resetKernel} title="Reset kernel (clear variables)">
+            ↺ Reset
+          </button>
+        </div>
+
+        <div className="code-editor-wrap">
+          <MonacoEditor
+            height="100%"
+            language="python"
+            theme={theme === 'dark' ? 'vs-dark' : 'light'}
+            value={code}
+            onChange={v => setCode(v || '')}
+            options={{
+              fontSize: 13,
+              minimap: { enabled: false },
+              scrollBeyondLastLine: false,
+              wordWrap: 'on',
+              lineNumbers: 'on',
+              tabSize: 4,
+            }}
+          />
+        </div>
+
+        <div className="code-output">
+          {output.length === 0 && !running && (
+            <span className="code-output-empty">Run code to see output</span>
+          )}
+          {output.map((ev, i) => {
+            if (ev.type === 'image') {
+              return <img key={i} src={`data:image/png;base64,${ev.data}`} className="code-output-img" alt="plot" />
+            }
+            return (
+              <pre key={i} className={`code-output-text ${ev.type === 'stderr' ? 'code-output-err' : ''}`}>
+                {ev.text}
+              </pre>
+            )
+          })}
+        </div>
+      </div>
+    </div>
+  )
+}
+
 // ── App ────────────────────────────────────────────────────
 export default function App() {
   const [authed, setAuthed] = useState(() => !!getToken())
@@ -668,6 +829,7 @@ export default function App() {
           <button className="menu-btn" onClick={() => setSidebarOpen(o => !o)}>☰</button>
           <div className={`tab ${tab === 'chat' ? 'active' : ''}`} onClick={() => setTab('chat')}>Chat</div>
           <div className={`tab ${tab === 'notes' ? 'active' : ''}`} onClick={() => setTab('notes')}>Notes</div>
+          <div className={`tab ${tab === 'code' ? 'active' : ''}`} onClick={() => setTab('code')}>Code</div>
         </div>
 
         {tab === 'chat'
@@ -679,7 +841,9 @@ export default function App() {
               initialMessages={activeMessages}
               onSaveConversation={handleSaveConversation}
             />
-          : <NotesPanel selectedNote={selectedNote} />
+          : tab === 'notes'
+          ? <NotesPanel selectedNote={selectedNote} />
+          : <CodePanel />
         }
       </div>
     </div>

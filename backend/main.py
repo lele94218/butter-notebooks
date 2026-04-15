@@ -27,10 +27,12 @@ logger = logging.getLogger(__name__)
 
 from tts import strip_markdown_for_tts, synthesize_speech
 from stt import whisper_transcribe
+from kernel_manager import kernel_manager
 
 # --- Config ---
 API_TOKEN = os.environ["API_TOKEN"]
 NOTES_ROOT = os.environ.get("NOTES_ROOT", str(Path.home()))
+CODE_ROOT = os.environ.get("CODE_ROOT", str(Path.home()))
 DATA_DIR = Path(os.environ.get("DATA_DIR", Path.home() / ".butter-notebooks"))
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 CONV_FILE = DATA_DIR / "conversations.json"
@@ -62,6 +64,14 @@ app = FastAPI(title="butter-notebooks")
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, lambda req, exc: Response("Too many requests", status_code=429))
 app.add_middleware(SlowAPIMiddleware)
+
+@app.on_event("startup")
+async def _startup():
+    kernel_manager.start_cleanup()
+
+@app.on_event("shutdown")
+async def _shutdown():
+    await kernel_manager.shutdown()
 
 app.add_middleware(
     CORSMiddleware,
@@ -376,6 +386,99 @@ async def delete_conversation(request: Request, conv_id: str, authorization: Opt
     convs = _load_convs()
     convs.pop(conv_id, None)
     _save_convs(convs)
+    return {"ok": True}
+
+
+# ── Code sandbox ──────────────────────────────────────────────
+
+def _safe_code_path(path: str) -> Path:
+    """Resolve path under CODE_ROOT, reject traversal."""
+    target = (Path(CODE_ROOT) / path).resolve()
+    if not str(target).startswith(str(Path(CODE_ROOT).resolve())):
+        raise HTTPException(status_code=403, detail="Access denied")
+    return target
+
+
+@app.get("/v1/files")
+@limiter.limit("60/minute")
+async def list_files(request: Request, path: str = "", authorization: Optional[str] = Header(None)):
+    """List files/dirs under CODE_ROOT/path."""
+    verify_token(authorization)
+    base = _safe_code_path(path)
+    if not base.exists() or not base.is_dir():
+        raise HTTPException(status_code=404, detail="Path not found")
+
+    entries = []
+    for p in sorted(base.iterdir()):
+        if p.name.startswith("."):
+            continue
+        entries.append({
+            "name": p.name,
+            "path": str(p.relative_to(CODE_ROOT)),
+            "is_dir": p.is_dir(),
+        })
+    return {"entries": entries, "root": CODE_ROOT}
+
+
+@app.get("/v1/files/read")
+@limiter.limit("60/minute")
+async def read_file(request: Request, path: str = "", authorization: Optional[str] = Header(None)):
+    """Read a file under CODE_ROOT."""
+    verify_token(authorization)
+    target = _safe_code_path(path)
+    if not target.exists() or not target.is_file():
+        raise HTTPException(status_code=404, detail="File not found")
+    return {"path": path, "content": target.read_text(errors="replace")}
+
+
+class WriteFileRequest(BaseModel):
+    path: str
+    content: str
+
+
+@app.put("/v1/files/write")
+@limiter.limit("60/minute")
+async def write_file(request: Request, body: WriteFileRequest, authorization: Optional[str] = Header(None)):
+    """Write/overwrite a file under CODE_ROOT."""
+    verify_token(authorization)
+    target = _safe_code_path(body.path)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(body.content)
+    return {"ok": True}
+
+
+class ExecuteRequest(BaseModel):
+    code: str
+    session_id: str = "default"
+
+
+@app.post("/v1/execute")
+@limiter.limit("30/minute")
+async def execute_code(request: Request, body: ExecuteRequest, authorization: Optional[str] = Header(None)):
+    """Execute Python code in a persistent kernel, SSE stream output."""
+    verify_token(authorization)
+
+    async def stream():
+        try:
+            kernel = await kernel_manager.get(body.session_id)
+            async for ev in kernel.execute(body.code):
+                yield f"data: {json.dumps(ev, ensure_ascii=False)}\n\n"
+        except asyncio.TimeoutError:
+            yield f"data: {json.dumps({'type': 'stderr', 'text': 'Execution timed out (60s)'})}\n\n"
+            yield f"data: {json.dumps({'type': 'done'})}\n\n"
+        except Exception as e:
+            yield f"data: {json.dumps({'type': 'stderr', 'text': str(e)})}\n\n"
+            yield f"data: {json.dumps({'type': 'done'})}\n\n"
+
+    return StreamingResponse(stream(), media_type="text/event-stream")
+
+
+@app.post("/v1/kernel/reset")
+@limiter.limit("30/minute")
+async def reset_kernel(request: Request, session_id: str = "default", authorization: Optional[str] = Header(None)):
+    """Reset kernel state (clear variables) for a session."""
+    verify_token(authorization)
+    await kernel_manager.reset(session_id)
     return {"ok": True}
 
 
