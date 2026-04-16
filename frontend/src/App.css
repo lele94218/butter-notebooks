@@ -287,13 +287,14 @@
 
 .message {
   display: flex;
+  flex-direction: column;
   max-width: var(--content-width);
   width: 100%;
   margin: 0 auto;
   padding: 0 var(--msg-padding-x);
 }
 
-.message.user { justify-content: flex-end; }
+.message.user { flex-direction: row; justify-content: flex-end; }
 
 /* User bubble */
 .msg-body {
