@@ -606,6 +606,15 @@
   display: block;
 }
 
+/* ── Assistant message wrapper ── */
+.msg-assistant {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 100%;
+  min-width: 0;
+}
+
 /* ── Thinking block ── */
 .msg-thinking {
   font-size: 0.78em;

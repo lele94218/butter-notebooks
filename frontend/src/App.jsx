@@ -304,7 +304,7 @@ function ChatPanel({ sessionId, onSessionId, convId, initialMessages, onSaveConv
         {messages.map((msg, i) => (
           <div key={i} className={`message ${msg.role}`}>
             {msg.role === 'assistant' ? (
-              <>
+              <div className="msg-assistant">
                 {msg.thinking ? <div className="msg-thinking">{msg.thinking}</div> : null}
                 {msg.text === '' && msg.streaming
                   ? <div className="thinking-dots"><span/><span/><span/></div>
@@ -314,7 +314,7 @@ function ChatPanel({ sessionId, onSessionId, convId, initialMessages, onSaveConv
                       ? <MdMessage text={msg.text} streaming={msg.streaming} />
                       : null
                 }
-              </>
+              </div>
             ) : <div className="msg-body">{msg.text}</div>}
           </div>
         ))}
