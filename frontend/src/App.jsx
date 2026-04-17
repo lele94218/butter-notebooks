@@ -86,14 +86,6 @@ async function fetchConversations() {
   return d.conversations || []
 }
 
-async function apiUpsertConv(conv) {
-  await fetch(`${API_BASE}/v1/conversations/${conv.id}`, {
-    method: 'PUT',
-    headers: { ...headers(), 'Content-Type': 'application/json' },
-    body: JSON.stringify(conv),
-  })
-}
-
 async function apiDeleteConv(id) {
   await fetch(`${API_BASE}/v1/conversations/${id}`, {
     method: 'DELETE',
@@ -208,7 +200,7 @@ function ChatPanel({ sessionId, onSessionId, convId, initialMessages, onSaveConv
       const res = await fetch(`${API_BASE}/v1/chat`, {
         method: 'POST',
         headers: { ...headers(), 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message: text, session_id: sessionId }),
+        body: JSON.stringify({ message: text, session_id: sessionId, conv_id: convId }),
       })
 
       const reader = res.body.getReader()
@@ -277,7 +269,7 @@ function ChatPanel({ sessionId, onSessionId, convId, initialMessages, onSaveConv
       setLoading(false)
       setStatus('')
     }
-  }, [input, loading, sessionId, onSessionId, onSaveConversation])
+  }, [input, loading, sessionId, convId, onSessionId, onSaveConversation])
 
   const onKeyDown = (e) => {
     if (e.key === 'Enter' && !e.shiftKey) {
@@ -758,7 +750,6 @@ export default function App() {
         : (firstUserMsg ? firstUserMsg.slice(0, 48) + (firstUserMsg.length > 48 ? '…' : '') : 'New conversation')
       // Keep our stable id, update sessionId to latest claude session_id for --resume
       const conv = { id, title, messages, sessionId: claudeSid, updatedAt: Date.now() }
-      apiUpsertConv(conv)
       let next
       if (existingIdx >= 0) {
         next = [...prev]

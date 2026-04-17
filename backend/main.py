@@ -28,6 +28,7 @@ logger = logging.getLogger(__name__)
 from tts import strip_markdown_for_tts, synthesize_speech
 from stt import whisper_transcribe
 from kernel_manager import kernel_manager
+from chat_store import ChatStore
 
 # --- Config ---
 API_TOKEN = os.environ["API_TOKEN"]
@@ -36,6 +37,15 @@ CODE_ROOT = os.environ.get("CODE_ROOT", str(Path.home()))
 DATA_DIR = Path(os.environ.get("DATA_DIR", Path.home() / ".butter-notebooks"))
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 CONV_FILE = DATA_DIR / "conversations.json"
+CHAT_DB = DATA_DIR / "chat.db"
+CONVERSATIONS_READ_SOURCE = os.environ.get("CONVERSATIONS_READ_SOURCE", "json").strip().lower()
+if CONVERSATIONS_READ_SOURCE not in ("json", "sqlite"):
+    CONVERSATIONS_READ_SOURCE = "json"
+chat_store = ChatStore(CHAT_DB)
+
+# msg_id -> background task running the claude subprocess. Kept so we can
+# inspect / cancel later; tail_stream does not depend on it.
+_agent_tasks: dict[str, asyncio.Task] = {}
 
 
 # --- Conversations persistence ---
@@ -68,6 +78,19 @@ app.add_middleware(SlowAPIMiddleware)
 @app.on_event("startup")
 async def _startup():
     kernel_manager.start_cleanup()
+    logger.info(f"conversations read source: {CONVERSATIONS_READ_SOURCE}")
+    try:
+        existing = await chat_store.count_conversations()
+        if existing == 0 and CONV_FILE.exists():
+            convs = _load_convs()
+            items = list(convs.values())
+            if items:
+                n = await chat_store.bulk_import_conversations(items)
+                logger.info(f"migrated {n} conversations from JSON to SQLite")
+    except Exception:
+        logger.error(
+            f"conversations JSON→SQLite migration failed: {traceback.format_exc()}"
+        )
 
 @app.on_event("shutdown")
 async def _shutdown():
@@ -200,11 +223,224 @@ async def run_agent_stream(prompt: str, session_id: Optional[str] = None):
         yield f"data: {json.dumps({'type': 'error', 'text': 'Agent failed'})}\n\n"
 
 
+# --- Persistent background agent runner ---
+
+def _parse_sse_line(sse: str) -> Optional[dict]:
+    """Extract the JSON body from a 'data: {...}\n\n' SSE line."""
+    if not sse.startswith("data: "):
+        return None
+    body = sse[6:]
+    if body.endswith("\n\n"):
+        body = body[:-2]
+    try:
+        return json.loads(body)
+    except Exception:
+        return None
+
+
+def _build_assistant_msg_from_chunks(chunks: list[tuple[int, str, str]]) -> dict:
+    """Reconstruct the front-end assistant message shape from stored chunks.
+
+    Front-end schema: {role: 'assistant', text, thinking?, streaming: false}.
+    Concatenates `delta` text and `thinking` payloads; tool_use / system /
+    result events are skipped because the UI never renders them.
+    """
+    text_parts: list[str] = []
+    thinking_parts: list[str] = []
+    for _seq, _type, payload in chunks:
+        try:
+            data = json.loads(payload)
+        except Exception:
+            continue
+        et = data.get("type")
+        if et == "delta":
+            t = data.get("text")
+            if t:
+                text_parts.append(t)
+        elif et == "thinking":
+            t = data.get("text")
+            if t:
+                thinking_parts.append(t)
+    msg: dict = {"role": "assistant", "text": "".join(text_parts), "streaming": False}
+    if thinking_parts:
+        msg["thinking"] = "".join(thinking_parts)
+    return msg
+
+
+async def _persist_conversation_after_turn(
+    req_conv_id: Optional[str],
+    prompt: str,
+    msg_id: str,
+    session_id: Optional[str],
+):
+    """Build the merged messages array for this turn and double-write it.
+
+    - conv_id resolution mirrors the front-end: prefer req_conv_id, else fall
+      back to the latest claude session_id (used as the stable id for a brand
+      new conversation's first turn).
+    - Prior messages are loaded from JSON (the canonical source for now);
+      we append the new user message + the reconstructed assistant reply.
+    - Title rule mirrors front-end App.jsx:756-758: keep existing if any,
+      else first 48 chars of the first user message + '…' if truncated.
+    - Writes go to JSON first (via _save_convs) then SQLite shadow, matching
+      the existing PUT endpoint's order. SQLite failures only log.
+    """
+    save_conv_id = req_conv_id or session_id or msg_id
+
+    chunks = await chat_store.get_chunks_after(msg_id, 0)
+    assistant_msg = _build_assistant_msg_from_chunks(chunks)
+
+    convs = _load_convs()
+    existing = convs.get(save_conv_id)
+    prior_messages = (existing.get("messages") if existing else None) or []
+
+    user_msg = {"role": "user", "text": prompt}
+    new_messages = list(prior_messages) + [user_msg, assistant_msg]
+
+    if existing and existing.get("title"):
+        title = existing["title"]
+    else:
+        first_user_text = ""
+        for m in new_messages:
+            if m.get("role") == "user":
+                first_user_text = m.get("text", "") or ""
+                break
+        title = first_user_text[:48] + ("…" if len(first_user_text) > 48 else "") \
+            if first_user_text else "New conversation"
+
+    import time as _time
+    updated_at = int(_time.time() * 1000)
+
+    conv = {
+        "id": save_conv_id,
+        "title": title,
+        "messages": new_messages,
+        "updatedAt": updated_at,
+        "sessionId": session_id,
+    }
+    convs[save_conv_id] = conv
+    _save_convs(convs)
+
+    try:
+        await chat_store.upsert_conversation(
+            conv_id=save_conv_id,
+            title=title,
+            messages=new_messages,
+            updated_at=updated_at,
+            session_id=session_id,
+        )
+    except Exception:
+        logger.error(
+            f"SQLite shadow upsert failed for conv {save_conv_id}: {traceback.format_exc()}"
+        )
+
+
+async def _run_agent_persistent(
+    msg_id: str,
+    prompt: str,
+    session_id: Optional[str],
+    conv_id: Optional[str],
+):
+    """Drive run_agent_stream and persist every event to chat_store.
+
+    Runs as a detached asyncio task: keeps going even if the HTTP client
+    disconnects, so the subprocess output is never lost.
+    """
+    new_session_id = session_id
+    status = "done"
+    error_text: Optional[str] = None
+
+    try:
+        async for sse_line in run_agent_stream(prompt, session_id):
+            event = _parse_sse_line(sse_line)
+            if event is None:
+                continue
+
+            etype = event.get("type")
+            if etype == "session" and event.get("session_id"):
+                new_session_id = event["session_id"]
+            elif etype == "done" and event.get("session_id"):
+                new_session_id = event["session_id"]
+            elif etype == "error":
+                status = "error"
+                error_text = event.get("text")
+
+            # Persist every event (including done/error) so tailers see the
+            # terminal transition even if they joined late.
+            await chat_store.append_chunk(msg_id, etype or "unknown", event)
+    except asyncio.CancelledError:
+        status = "cancelled"
+        raise
+    except Exception as e:
+        status = "error"
+        error_text = str(e)
+        logger.error(f"persistent agent failed: {traceback.format_exc()}")
+        try:
+            await chat_store.append_chunk(
+                msg_id, "error", {"type": "error", "text": error_text}
+            )
+        except Exception:
+            pass
+    finally:
+        await chat_store.finish_message(
+            msg_id,
+            status=status,
+            session_id=new_session_id,
+            error_text=error_text,
+        )
+        # Backend-authoritative conversation persistence: only on clean turns,
+        # so a half-dead stream never corrupts the saved transcript. Wrapped
+        # so persistence bugs can't break SSE delivery (we're past the yield
+        # path here, but the task should still finish without a hard crash).
+        if status == "done":
+            try:
+                await _persist_conversation_after_turn(
+                    conv_id, prompt, msg_id, new_session_id
+                )
+            except Exception:
+                logger.error(
+                    f"auto conversation persist failed for msg {msg_id}: "
+                    f"{traceback.format_exc()}"
+                )
+        _agent_tasks.pop(msg_id, None)
+
+
+async def _tail_message(msg_id: str, after_seq: int = 0):
+    """SSE generator that tails chat_store chunks for a given message.
+
+    Yields every chunk strictly greater than `after_seq`, then blocks on the
+    store's Condition until new chunks arrive or the message reaches a terminal
+    status. Multiple tailers (e.g. two browser tabs) can run concurrently on
+    the same msg_id.
+    """
+    while True:
+        chunks = await chat_store.get_chunks_after(msg_id, after_seq)
+        for seq, _type, payload in chunks:
+            after_seq = seq
+            yield f"data: {payload}\n\n"
+
+        msg = await chat_store.get_message(msg_id)
+        if msg is None:
+            return
+        if msg["status"] != "streaming":
+            # Drain anything written between the last fetch and the status
+            # update so the terminal event is always delivered.
+            chunks = await chat_store.get_chunks_after(msg_id, after_seq)
+            for seq, _type, payload in chunks:
+                after_seq = seq
+                yield f"data: {payload}\n\n"
+            return
+
+        await chat_store.wait_for_update(msg_id, timeout=30.0)
+
+
 # --- Routes ---
 
 class ChatRequest(BaseModel):
     message: str
     session_id: Optional[str] = None
+    conv_id: Optional[str] = None
+    msg_id: Optional[str] = None
 
 
 class TTSRequest(BaseModel):
@@ -228,13 +464,72 @@ async def tts_endpoint(request: Request, body: TTSRequest, authorization: Option
 @app.post("/v1/chat")
 @limiter.limit("30/minute")
 async def chat(request: Request, req: ChatRequest, authorization: Optional[str] = Header(None)):
-    """SSE stream: transcription → delta text → done."""
+    """SSE stream backed by SQLite.
+
+    The claude subprocess runs as a detached asyncio task that persists every
+    event to chat_store. The HTTP response just tails the store — so if the
+    browser disconnects, the background task keeps writing and a later
+    /v1/chat/resume/{msg_id} call picks up where we left off.
+    """
     verify_token(authorization)
 
-    return StreamingResponse(
-        run_agent_stream(req.message, req.session_id),
-        media_type="text/event-stream",
+    conv_id = req.conv_id or "default"
+    msg_id = await chat_store.create_message(conv_id, req.msg_id)
+
+    task = asyncio.create_task(
+        _run_agent_persistent(msg_id, req.message, req.session_id, req.conv_id)
     )
+    _agent_tasks[msg_id] = task
+
+    async def stream():
+        yield (
+            "data: "
+            + json.dumps(
+                {"type": "message_start", "msg_id": msg_id, "conv_id": conv_id},
+                ensure_ascii=False,
+            )
+            + "\n\n"
+        )
+        async for chunk in _tail_message(msg_id, after_seq=0):
+            yield chunk
+
+    return StreamingResponse(stream(), media_type="text/event-stream")
+
+
+@app.get("/v1/chat/resume/{msg_id}")
+@limiter.limit("60/minute")
+async def resume_chat(
+    request: Request,
+    msg_id: str,
+    after_seq: int = 0,
+    authorization: Optional[str] = Header(None),
+):
+    """Replay + live-tail a message by id. Safe to call after a disconnect."""
+    verify_token(authorization)
+
+    msg = await chat_store.get_message(msg_id)
+    if msg is None:
+        raise HTTPException(status_code=404, detail="Message not found")
+
+    async def stream():
+        yield (
+            "data: "
+            + json.dumps(
+                {
+                    "type": "message_start",
+                    "msg_id": msg_id,
+                    "conv_id": msg["conv_id"],
+                    "status": msg["status"],
+                    "resumed": True,
+                },
+                ensure_ascii=False,
+            )
+            + "\n\n"
+        )
+        async for chunk in _tail_message(msg_id, after_seq=after_seq):
+            yield chunk
+
+    return StreamingResponse(stream(), media_type="text/event-stream")
 
 
 @app.post("/v1/chat/voice")
@@ -351,32 +646,21 @@ async def read_note(request: Request, path: str = "", authorization: Optional[st
     return {"path": path, "content": target.read_text()}
 
 
-class ConvUpsert(BaseModel):
-    id: str
-    title: str
-    messages: list
-    updatedAt: int
-    sessionId: Optional[str] = None
-
-
 @app.get("/v1/conversations")
 @limiter.limit("60/minute")
 async def list_conversations(request: Request, authorization: Optional[str] = Header(None)):
     verify_token(authorization)
+    if CONVERSATIONS_READ_SOURCE == "sqlite":
+        try:
+            items = await chat_store.list_conversations(limit=100)
+            return {"conversations": items, "source": "sqlite"}
+        except Exception:
+            logger.error(
+                f"SQLite read failed, falling back to JSON: {traceback.format_exc()}"
+            )
     convs = _load_convs()
-    # Return sorted newest first
     items = sorted(convs.values(), key=lambda c: c.get("updatedAt", 0), reverse=True)
-    return {"conversations": items[:100]}
-
-
-@app.put("/v1/conversations/{conv_id}")
-@limiter.limit("60/minute")
-async def upsert_conversation(request: Request, conv_id: str, body: ConvUpsert, authorization: Optional[str] = Header(None)):
-    verify_token(authorization)
-    convs = _load_convs()
-    convs[conv_id] = body.model_dump()
-    _save_convs(convs)
-    return {"ok": True}
+    return {"conversations": items[:100], "source": "json"}
 
 
 @app.delete("/v1/conversations/{conv_id}")
@@ -386,6 +670,12 @@ async def delete_conversation(request: Request, conv_id: str, authorization: Opt
     convs = _load_convs()
     convs.pop(conv_id, None)
     _save_convs(convs)
+    try:
+        await chat_store.delete_conversation(conv_id)
+    except Exception:
+        logger.error(
+            f"SQLite shadow delete failed for conv {conv_id}: {traceback.format_exc()}"
+        )
     return {"ok": True}
 
 
