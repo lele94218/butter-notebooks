@@ -4,11 +4,14 @@
 set -e
 OUT=/var/www/butter-notebooks/_stats
 mkdir -p "$OUT"
-zcat -f /var/log/nginx/access.log* 2>/dev/null | \
-  goaccess - \
-    --log-format=COMBINED \
-    --output="$OUT/index.html" \
-    --no-progress \
-    --anonymize-ip \
-    2>/dev/null
+# goaccess 1.3 doesn't predefine VCOMBINED, so the format is spelled out.
+# Layout: $host $remote_addr - $remote_user [date time tz] "req" status bytes "ref" "ua"
+goaccess /var/log/nginx/access.log \
+  --log-format='%v %h %^[%d:%t %^] "%r" %s %b "%R" "%u"' \
+  --date-format='%d/%b/%Y' \
+  --time-format='%H:%M:%S' \
+  --output="$OUT/index.html" \
+  --no-progress \
+  --anonymize-ip \
+  2>/dev/null
 chmod 644 "$OUT/index.html"
