@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import Optional
 
 from dotenv import load_dotenv
-from fastapi import FastAPI, File, Header, HTTPException, Query, Request, UploadFile
+from fastapi import FastAPI, File, Header, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, Response, StreamingResponse
 from pydantic import BaseModel
@@ -103,9 +103,16 @@ async def _startup():
 async def _shutdown():
     await kernel_manager.shutdown()
 
+_allow_origins_env = os.environ.get("CORS_ALLOW_ORIGINS", "").strip()
+ALLOW_ORIGINS = (
+    [o.strip() for o in _allow_origins_env.split(",") if o.strip()]
+    if _allow_origins_env
+    else ["https://your-site.example.com", "http://localhost:5173"]
+)
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=ALLOW_ORIGINS,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -771,19 +778,11 @@ async def upload_image(
 async def serve_upload(
     request: Request,
     path: str,
-    t: Optional[str] = Query(None),
     authorization: Optional[str] = Header(None),
 ):
-    """Serve an uploaded image. Accepts token via Authorization header OR ?t=<token>
-    (the latter is required because <img> tags can't set custom headers)."""
-    # Auth: either header or query param must match.
-    token_ok = False
-    if authorization and authorization.startswith("Bearer ") and authorization[7:] == API_TOKEN:
-        token_ok = True
-    elif t and t == API_TOKEN:
-        token_ok = True
-    if not token_ok:
-        raise HTTPException(status_code=401, detail="Missing token")
+    """Serve an uploaded image. Auth via Authorization header only — frontend
+    fetches with the header and wraps the response in a blob URL."""
+    verify_token(authorization)
 
     # Reject traversal: resolve and confirm result is still under uploads root.
     if ".." in path.split("/"):

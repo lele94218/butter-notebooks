@@ -32,6 +32,31 @@ const getToken = () => localStorage.getItem(TOKEN_KEY) || ''
 const headers = () => ({ Authorization: `Bearer ${getToken()}` })
 // VITE_API_TOKEN is only used to pre-fill the login input in dev — never auto-stores
 
+// Fetches an auth-protected image and renders it via a blob URL, so the bearer
+// token never ends up in the URL (and therefore never in server access logs).
+function AuthImage({ url, className, alt }) {
+  const [src, setSrc] = useState(null)
+  useEffect(() => {
+    if (!url) return
+    let cancelled = false
+    let blobUrl = null
+    fetch(`${API_BASE}${url}`, { headers: headers() })
+      .then(r => r.ok ? r.blob() : Promise.reject(r.status))
+      .then(blob => {
+        if (cancelled) return
+        blobUrl = URL.createObjectURL(blob)
+        setSrc(blobUrl)
+      })
+      .catch(() => { if (!cancelled) setSrc(null) })
+    return () => {
+      cancelled = true
+      if (blobUrl) URL.revokeObjectURL(blobUrl)
+    }
+  }, [url])
+  if (!src) return <div className={`${className || ''} msg-image--loading`} />
+  return <img src={src} className={className} alt={alt} />
+}
+
 // ── Login screen ───────────────────────────────────────────
 function LoginScreen({ onAuth }) {
   const [input, setInput] = useState(import.meta.env.VITE_API_TOKEN || '')
@@ -453,13 +478,9 @@ function ChatPanel({ sessionId, onSessionId, convId, initialMessages, onSaveConv
               <div className="msg-user-wrap">
                 {msg.images && msg.images.length > 0 && (
                   <div className="msg-images">
-                    {msg.images.map((im, j) => {
-                      const src = im.url
-                        ? `${API_BASE}${im.url}?t=${encodeURIComponent(getToken())}`
-                        : null
-                      if (!src) return null
-                      return <img key={j} src={src} className="msg-image" alt="attached" />
-                    })}
+                    {msg.images.map((im, j) =>
+                      im.url ? <AuthImage key={j} url={im.url} className="msg-image" alt="attached" /> : null
+                    )}
                   </div>
                 )}
                 {msg.text ? <div className="msg-body">{msg.text}</div> : null}

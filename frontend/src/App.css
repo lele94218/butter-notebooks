@@ -884,6 +884,13 @@ textarea::placeholder { color: var(--text2); }
   border: 1px solid var(--border);
   display: block;
 }
+.msg-image--loading {
+  width: 160px;
+  height: 120px;
+  border-radius: 8px;
+  border: 1px dashed var(--border);
+  background: var(--bg-elev);
+}
 
 /* ── Note viewer ── */
 .note-panel {
