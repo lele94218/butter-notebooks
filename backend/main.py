@@ -4,16 +4,19 @@ import asyncio
 import base64
 import json
 import logging
+import mimetypes
 import os
 import tempfile
 import traceback
+import uuid
+from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
 from dotenv import load_dotenv
-from fastapi import FastAPI, File, Header, HTTPException, Request, UploadFile
+from fastapi import FastAPI, File, Header, HTTPException, Query, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import Response, StreamingResponse
+from fastapi.responses import FileResponse, Response, StreamingResponse
 from pydantic import BaseModel
 from slowapi import Limiter
 from slowapi.util import get_remote_address
@@ -38,6 +41,10 @@ DATA_DIR = Path(os.environ.get("DATA_DIR", Path.home() / ".butter-notebooks"))
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 CONV_FILE = DATA_DIR / "conversations.json"
 CHAT_DB = DATA_DIR / "chat.db"
+UPLOADS_DIR = DATA_DIR / "uploads"
+UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
+UPLOADS_ROOT_RESOLVED = UPLOADS_DIR.resolve()
+MAX_UPLOAD_BYTES = 10 * 1024 * 1024  # 10 MB
 CONVERSATIONS_READ_SOURCE = os.environ.get("CONVERSATIONS_READ_SOURCE", "json").strip().lower()
 if CONVERSATIONS_READ_SOURCE not in ("json", "sqlite"):
     CONVERSATIONS_READ_SOURCE = "json"
@@ -107,6 +114,15 @@ app.add_middleware(
 
 CLAUDE_BIN = os.environ.get("CLAUDE_BIN", "claude")
 CLAUDE_ALLOWED_TOOLS = "Read,Write,Edit,Glob,Grep,Bash"
+CLAUDE_MODELS = ("claude-sonnet-4-6", "claude-opus-4-6", "claude-opus-4-7")
+CLAUDE_DEFAULT_MODEL = "claude-sonnet-4-6"
+
+
+def _normalize_model(model: Optional[str]) -> Optional[str]:
+    """Only pass through known model IDs; otherwise let claude CLI default."""
+    if model and model in CLAUDE_MODELS:
+        return model
+    return None
 CLAUDE_SYSTEM_PROMPT = (
     "You are a helpful assistant in a web app that renders Markdown and LaTeX via KaTeX. "
     "When writing math formulas, ALWAYS use LaTeX delimiters: "
@@ -117,27 +133,85 @@ CLAUDE_SYSTEM_PROMPT = (
 
 
 # --- Agent chat via claude CLI ---
-async def run_agent_stream(prompt: str, session_id: Optional[str] = None):
-    """Run `claude -p --output-format stream-json`, read events line-by-line, yield SSE."""
+def _build_user_message_payload(
+    prompt: str,
+    images: Optional[list[dict]] = None,
+) -> dict:
+    """Build a single stream-json user message: image blocks first, then text.
+
+    Each image dict must have `path` (absolute, under UPLOADS_DIR) and `mime`
+    (e.g. 'image/png'). The file is read and inlined as base64 — claude CLI's
+    stream-json input expects full content blocks, not file paths.
+    """
+    content: list[dict] = []
+    for img in images or []:
+        p = Path(img["path"]).resolve()
+        # Hard guard: reject anything that isn't under uploads dir.
+        try:
+            p.relative_to(UPLOADS_ROOT_RESOLVED)
+        except ValueError:
+            raise HTTPException(status_code=403, detail="Image path outside uploads dir")
+        if not p.is_file():
+            raise HTTPException(status_code=404, detail=f"Image not found: {img['path']}")
+        data = base64.b64encode(p.read_bytes()).decode("ascii")
+        content.append({
+            "type": "image",
+            "source": {
+                "type": "base64",
+                "media_type": img.get("mime") or "image/png",
+                "data": data,
+            },
+        })
+    content.append({"type": "text", "text": prompt})
+    return {
+        "type": "user",
+        "message": {"role": "user", "content": content},
+    }
+
+
+async def run_agent_stream(
+    prompt: str,
+    session_id: Optional[str] = None,
+    model: Optional[str] = None,
+    images: Optional[list[dict]] = None,
+):
+    """Run `claude -p --input-format stream-json --output-format stream-json`.
+
+    The user message (text + optional image blocks) is written to stdin as a
+    single JSON line; stdin is then closed. Output streaming is unchanged.
+    """
     cmd = [
         CLAUDE_BIN, "-p",
+        "--input-format", "stream-json",
         "--output-format", "stream-json",
         "--verbose",
         "--allowed-tools", CLAUDE_ALLOWED_TOOLS,
         "--permission-mode", "acceptEdits",
         "--dangerously-skip-permissions",
         "--system-prompt", CLAUDE_SYSTEM_PROMPT,
-        prompt,
     ]
     if session_id:
         cmd += ["--resume", session_id]
+    picked_model = _normalize_model(model)
+    if picked_model:
+        cmd += ["--model", picked_model]
 
     # Strip CLAUDECODE so nested claude CLI doesn't refuse to start
     env = {k: v for k, v in os.environ.items() if k != "CLAUDECODE"}
 
     try:
+        user_msg_payload = _build_user_message_payload(prompt, images)
+    except HTTPException as e:
+        yield f"data: {json.dumps({'type': 'error', 'text': e.detail})}\n\n"
+        return
+    except Exception as e:
+        yield f"data: {json.dumps({'type': 'error', 'text': f'image load failed: {e}'})}\n\n"
+        return
+
+    try:
         proc = await asyncio.create_subprocess_exec(
             *cmd,
+            stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
             cwd=NOTES_ROOT,
@@ -145,6 +219,21 @@ async def run_agent_stream(prompt: str, session_id: Optional[str] = None):
         )
     except Exception as e:
         yield f"data: {json.dumps({'type': 'error', 'text': str(e)})}\n\n"
+        return
+
+    # Write the single user message line, then close stdin so claude stops
+    # waiting for more input and processes what it has.
+    try:
+        proc.stdin.write((json.dumps(user_msg_payload, ensure_ascii=False) + "\n").encode("utf-8"))
+        await proc.stdin.drain()
+        proc.stdin.close()
+    except Exception as e:
+        logger.error(f"failed to write stream-json input: {e}")
+        yield f"data: {json.dumps({'type': 'error', 'text': f'stdin write failed: {e}'})}\n\n"
+        try:
+            proc.kill()
+        except Exception:
+            pass
         return
 
     new_session_id = session_id
@@ -272,6 +361,8 @@ async def _persist_conversation_after_turn(
     prompt: str,
     msg_id: str,
     session_id: Optional[str],
+    model: Optional[str],
+    images: Optional[list[dict]] = None,
 ):
     """Build the merged messages array for this turn and double-write it.
 
@@ -294,7 +385,9 @@ async def _persist_conversation_after_turn(
     existing = convs.get(save_conv_id)
     prior_messages = (existing.get("messages") if existing else None) or []
 
-    user_msg = {"role": "user", "text": prompt}
+    user_msg: dict = {"role": "user", "text": prompt}
+    if images:
+        user_msg["images"] = images
     new_messages = list(prior_messages) + [user_msg, assistant_msg]
 
     if existing and existing.get("title"):
@@ -311,12 +404,17 @@ async def _persist_conversation_after_turn(
     import time as _time
     updated_at = int(_time.time() * 1000)
 
+    effective_model = _normalize_model(model)
+    if not effective_model and existing:
+        effective_model = existing.get("model")
+
     conv = {
         "id": save_conv_id,
         "title": title,
         "messages": new_messages,
         "updatedAt": updated_at,
         "sessionId": session_id,
+        "model": effective_model,
     }
     convs[save_conv_id] = conv
     _save_convs(convs)
@@ -328,6 +426,7 @@ async def _persist_conversation_after_turn(
             messages=new_messages,
             updated_at=updated_at,
             session_id=session_id,
+            model=effective_model,
         )
     except Exception:
         logger.error(
@@ -340,6 +439,8 @@ async def _run_agent_persistent(
     prompt: str,
     session_id: Optional[str],
     conv_id: Optional[str],
+    model: Optional[str],
+    images: Optional[list[dict]] = None,
 ):
     """Drive run_agent_stream and persist every event to chat_store.
 
@@ -351,7 +452,7 @@ async def _run_agent_persistent(
     error_text: Optional[str] = None
 
     try:
-        async for sse_line in run_agent_stream(prompt, session_id):
+        async for sse_line in run_agent_stream(prompt, session_id, model, images):
             event = _parse_sse_line(sse_line)
             if event is None:
                 continue
@@ -395,7 +496,7 @@ async def _run_agent_persistent(
         if status == "done":
             try:
                 await _persist_conversation_after_turn(
-                    conv_id, prompt, msg_id, new_session_id
+                    conv_id, prompt, msg_id, new_session_id, model, images
                 )
             except Exception:
                 logger.error(
@@ -441,6 +542,9 @@ class ChatRequest(BaseModel):
     session_id: Optional[str] = None
     conv_id: Optional[str] = None
     msg_id: Optional[str] = None
+    model: Optional[str] = None
+    # images: list of {"path": str, "mime": str}. Paths must live under UPLOADS_DIR.
+    images: Optional[list[dict]] = None
 
 
 class TTSRequest(BaseModel):
@@ -473,11 +577,27 @@ async def chat(request: Request, req: ChatRequest, authorization: Optional[str] 
     """
     verify_token(authorization)
 
+    # Validate images up-front so the caller gets a 4xx instead of an in-stream error.
+    images = req.images or None
+    if images:
+        for img in images:
+            if not isinstance(img, dict) or "path" not in img or "mime" not in img:
+                raise HTTPException(status_code=400, detail="Each image needs {path, mime}")
+            try:
+                p = Path(img["path"]).resolve()
+                p.relative_to(UPLOADS_ROOT_RESOLVED)
+            except ValueError:
+                raise HTTPException(status_code=403, detail="Image path outside uploads dir")
+            if not p.is_file():
+                raise HTTPException(status_code=404, detail=f"Image not found: {img['path']}")
+
     conv_id = req.conv_id or "default"
     msg_id = await chat_store.create_message(conv_id, req.msg_id)
 
     task = asyncio.create_task(
-        _run_agent_persistent(msg_id, req.message, req.session_id, req.conv_id)
+        _run_agent_persistent(
+            msg_id, req.message, req.session_id, req.conv_id, req.model, images
+        )
     )
     _agent_tasks[msg_id] = task
 
@@ -590,6 +710,94 @@ async def chat_voice(
         yield "data: [DONE]\n\n"
 
     return StreamingResponse(event_stream(), media_type="text/event-stream")
+
+
+# --- Image upload & serve ---
+
+_IMAGE_EXT_BY_MIME = {
+    "image/png": ".png",
+    "image/jpeg": ".jpg",
+    "image/jpg": ".jpg",
+    "image/webp": ".webp",
+    "image/gif": ".gif",
+    "image/heic": ".heic",
+}
+
+
+@app.post("/v1/upload")
+@limiter.limit("60/minute")
+async def upload_image(
+    request: Request,
+    file: UploadFile = File(...),
+    authorization: Optional[str] = Header(None),
+):
+    """Accept a single image file (<10MB) and store it under uploads/YYYY-MM-DD/."""
+    verify_token(authorization)
+
+    mime = (file.content_type or "").lower()
+    if not mime.startswith("image/"):
+        raise HTTPException(status_code=400, detail=f"Not an image (content-type={mime})")
+
+    data = await file.read()
+    if len(data) == 0:
+        raise HTTPException(status_code=400, detail="Empty file")
+    if len(data) > MAX_UPLOAD_BYTES:
+        raise HTTPException(status_code=413, detail=f"File too large (max {MAX_UPLOAD_BYTES} bytes)")
+
+    ext = _IMAGE_EXT_BY_MIME.get(mime)
+    if not ext:
+        # Fall back to the upload's filename extension if we don't know the mime.
+        ext = Path(file.filename or "").suffix.lower() or ".bin"
+
+    day = datetime.utcnow().strftime("%Y-%m-%d")
+    day_dir = UPLOADS_DIR / day
+    day_dir.mkdir(parents=True, exist_ok=True)
+    name = f"{uuid.uuid4().hex}{ext}"
+    dest = day_dir / name
+    dest.write_bytes(data)
+
+    rel = f"{day}/{name}"
+    abs_path = str(dest.resolve())
+    logger.info(f"[upload] {rel} ({len(data)} bytes, {mime})")
+    return {
+        "path": abs_path,
+        "mime": mime,
+        "url": f"/v1/uploads/{rel}",
+    }
+
+
+@app.get("/v1/uploads/{path:path}")
+@limiter.limit("120/minute")
+async def serve_upload(
+    request: Request,
+    path: str,
+    t: Optional[str] = Query(None),
+    authorization: Optional[str] = Header(None),
+):
+    """Serve an uploaded image. Accepts token via Authorization header OR ?t=<token>
+    (the latter is required because <img> tags can't set custom headers)."""
+    # Auth: either header or query param must match.
+    token_ok = False
+    if authorization and authorization.startswith("Bearer ") and authorization[7:] == API_TOKEN:
+        token_ok = True
+    elif t and t == API_TOKEN:
+        token_ok = True
+    if not token_ok:
+        raise HTTPException(status_code=401, detail="Missing token")
+
+    # Reject traversal: resolve and confirm result is still under uploads root.
+    if ".." in path.split("/"):
+        raise HTTPException(status_code=403, detail="Access denied")
+    target = (UPLOADS_DIR / path).resolve()
+    try:
+        target.relative_to(UPLOADS_ROOT_RESOLVED)
+    except ValueError:
+        raise HTTPException(status_code=403, detail="Access denied")
+    if not target.is_file():
+        raise HTTPException(status_code=404, detail="Not found")
+
+    mime, _ = mimetypes.guess_type(str(target))
+    return FileResponse(str(target), media_type=mime or "application/octet-stream")
 
 
 @app.get("/v1/notes")

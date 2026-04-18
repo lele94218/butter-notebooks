@@ -37,7 +37,8 @@ CREATE TABLE IF NOT EXISTS conversations (
     title TEXT,
     messages TEXT NOT NULL,
     updated_at INTEGER NOT NULL,
-    session_id TEXT
+    session_id TEXT,
+    model TEXT
 );
 
 CREATE INDEX IF NOT EXISTS idx_conv_updated
@@ -52,6 +53,7 @@ def _conv_row_to_dict(row) -> dict:
         "messages": json.loads(row[2]) if row[2] else [],
         "updatedAt": row[3],
         "sessionId": row[4],
+        "model": row[5] if len(row) > 5 else None,
     }
 
 
@@ -89,6 +91,9 @@ class ChatStore:
         conn = self._conn()
         try:
             conn.executescript(SCHEMA)
+            cols = {r[1] for r in conn.execute("PRAGMA table_info(conversations)").fetchall()}
+            if "model" not in cols:
+                conn.execute("ALTER TABLE conversations ADD COLUMN model TEXT")
             conn.commit()
         finally:
             conn.close()
@@ -250,21 +255,24 @@ class ChatStore:
         messages: list,
         updated_at: int,
         session_id: Optional[str],
+        model: Optional[str],
     ):
         conn = self._conn()
         try:
             conn.execute(
-                "INSERT INTO conversations (conv_id, title, messages, updated_at, session_id) "
-                "VALUES (?, ?, ?, ?, ?) "
+                "INSERT INTO conversations (conv_id, title, messages, updated_at, session_id, model) "
+                "VALUES (?, ?, ?, ?, ?, ?) "
                 "ON CONFLICT(conv_id) DO UPDATE SET "
                 "title=excluded.title, messages=excluded.messages, "
-                "updated_at=excluded.updated_at, session_id=excluded.session_id",
+                "updated_at=excluded.updated_at, session_id=excluded.session_id, "
+                "model=excluded.model",
                 (
                     conv_id,
                     title,
                     json.dumps(messages, ensure_ascii=False),
                     updated_at,
                     session_id,
+                    model,
                 ),
             )
             conn.commit()
@@ -275,7 +283,7 @@ class ChatStore:
         conn = self._conn()
         try:
             rows = conn.execute(
-                "SELECT conv_id, title, messages, updated_at, session_id "
+                "SELECT conv_id, title, messages, updated_at, session_id, model "
                 "FROM conversations ORDER BY updated_at DESC LIMIT ?",
                 (limit,),
             ).fetchall()
@@ -287,7 +295,7 @@ class ChatStore:
         conn = self._conn()
         try:
             row = conn.execute(
-                "SELECT conv_id, title, messages, updated_at, session_id "
+                "SELECT conv_id, title, messages, updated_at, session_id, model "
                 "FROM conversations WHERE conv_id=?",
                 (conv_id,),
             ).fetchone()
@@ -317,14 +325,15 @@ class ChatStore:
                 messages = item.get("messages") or []
                 conn.execute(
                     "INSERT OR IGNORE INTO conversations "
-                    "(conv_id, title, messages, updated_at, session_id) "
-                    "VALUES (?, ?, ?, ?, ?)",
+                    "(conv_id, title, messages, updated_at, session_id, model) "
+                    "VALUES (?, ?, ?, ?, ?, ?)",
                     (
                         conv_id,
                         item.get("title"),
                         json.dumps(messages, ensure_ascii=False),
                         int(item.get("updatedAt") or 0),
                         item.get("sessionId"),
+                        item.get("model"),
                     ),
                 )
                 count += 1
@@ -348,6 +357,7 @@ class ChatStore:
         messages: list,
         updated_at: int,
         session_id: Optional[str],
+        model: Optional[str] = None,
     ):
         await asyncio.to_thread(
             self._upsert_conversation_sync,
@@ -356,6 +366,7 @@ class ChatStore:
             messages,
             updated_at,
             session_id,
+            model,
         )
 
     async def list_conversations(self, limit: int = 100) -> list[dict]:

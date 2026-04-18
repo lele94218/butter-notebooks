@@ -276,6 +276,50 @@
   overflow: hidden;
 }
 
+.chat-topbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 14px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg);
+  font-size: 12px;
+  color: var(--text2);
+  flex-shrink: 0;
+}
+
+.chat-topbar .model-select {
+  background: var(--bg2);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 2px 6px;
+  font-size: 12px;
+  cursor: pointer;
+}
+.chat-topbar .model-select:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.chat-topbar .sid-pill {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  padding: 2px 8px;
+  border-radius: 10px;
+  background: var(--bg3);
+  color: var(--text2);
+  cursor: pointer;
+  user-select: none;
+}
+.chat-topbar .sid-pill:hover {
+  color: var(--text);
+}
+.chat-topbar .sid-pill--copied {
+  background: var(--accent, #4ade80);
+  color: #111;
+  transition: background 0.15s;
+}
+
 .chat-area {
   flex: 1;
   overflow-y: auto;
@@ -722,6 +766,124 @@ textarea::placeholder { color: var(--text2); }
 .send-btn svg { color: #000; }
 .send-btn:hover { opacity: 0.8; }
 .send-btn:disabled { opacity: 0.25; cursor: not-allowed; }
+
+/* ── Attach button & thumbnail strip ── */
+.attach-btn {
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  width: 28px;
+  height: 28px;
+  cursor: pointer;
+  color: var(--text2);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  transition: color 0.15s, border-color 0.15s, background 0.15s;
+}
+.attach-btn:hover { color: var(--text); border-color: var(--text3); background: var(--bg3); }
+.attach-btn:disabled { opacity: 0.35; cursor: not-allowed; }
+
+.attach-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 6px;
+  padding: 6px 6px 0 6px;
+}
+
+.attach-thumb {
+  position: relative;
+  width: 56px;
+  height: 56px;
+  border-radius: 6px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  background: var(--bg3);
+  flex-shrink: 0;
+}
+.attach-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+.attach-thumb.uploading { opacity: 0.55; }
+.attach-thumb.error { border-color: hsl(0 70% 55%); }
+
+.attach-spinner {
+  position: absolute;
+  inset: 0;
+  border: 2px solid transparent;
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  width: 18px;
+  height: 18px;
+  margin: auto;
+  animation: attach-spin 0.8s linear infinite;
+  pointer-events: none;
+}
+@keyframes attach-spin { to { transform: rotate(360deg); } }
+
+.attach-err {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: hsl(0 70% 55%);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+}
+
+.attach-remove {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  background: rgba(0, 0, 0, 0.6);
+  color: #fff;
+  border: none;
+  border-radius: 50%;
+  width: 16px;
+  height: 16px;
+  font-size: 12px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.attach-remove:hover { background: rgba(0, 0, 0, 0.8); }
+
+/* ── In-message image thumbnails (user messages) ── */
+.msg-user-wrap {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 6px;
+  max-width: 75%;
+}
+.msg-images {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  justify-content: flex-end;
+}
+.msg-image {
+  max-width: 240px;
+  max-height: 240px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  display: block;
+}
 
 /* ── Note viewer ── */
 .note-panel {
