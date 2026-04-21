@@ -45,9 +45,6 @@ UPLOADS_DIR = DATA_DIR / "uploads"
 UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
 UPLOADS_ROOT_RESOLVED = UPLOADS_DIR.resolve()
 MAX_UPLOAD_BYTES = 10 * 1024 * 1024  # 10 MB
-CONVERSATIONS_READ_SOURCE = os.environ.get("CONVERSATIONS_READ_SOURCE", "json").strip().lower()
-if CONVERSATIONS_READ_SOURCE not in ("json", "sqlite"):
-    CONVERSATIONS_READ_SOURCE = "json"
 chat_store = ChatStore(CHAT_DB)
 
 # msg_id -> background task running the claude subprocess. Kept so we can
@@ -55,16 +52,13 @@ chat_store = ChatStore(CHAT_DB)
 _agent_tasks: dict[str, asyncio.Task] = {}
 
 
-# --- Conversations persistence ---
-def _load_convs() -> dict:
+# --- Conversations persistence (SQLite-only) ---
+def _load_convs_for_migration() -> dict:
+    """Read the legacy JSON file — used only for one-time startup migration."""
     try:
         return json.loads(CONV_FILE.read_text()) if CONV_FILE.exists() else {}
     except Exception:
         return {}
-
-
-def _save_convs(data: dict):
-    CONV_FILE.write_text(json.dumps(data, ensure_ascii=False))
 
 
 # --- Auth ---
@@ -85,11 +79,10 @@ app.add_middleware(SlowAPIMiddleware)
 @app.on_event("startup")
 async def _startup():
     kernel_manager.start_cleanup()
-    logger.info(f"conversations read source: {CONVERSATIONS_READ_SOURCE}")
     try:
         existing = await chat_store.count_conversations()
         if existing == 0 and CONV_FILE.exists():
-            convs = _load_convs()
+            convs = _load_convs_for_migration()
             items = list(convs.values())
             if items:
                 n = await chat_store.bulk_import_conversations(items)
@@ -371,25 +364,21 @@ async def _persist_conversation_after_turn(
     model: Optional[str],
     images: Optional[list[dict]] = None,
 ):
-    """Build the merged messages array for this turn and double-write it.
+    """Build the merged messages array for this turn and write to SQLite.
 
     - conv_id resolution mirrors the front-end: prefer req_conv_id, else fall
       back to the latest claude session_id (used as the stable id for a brand
       new conversation's first turn).
-    - Prior messages are loaded from JSON (the canonical source for now);
-      we append the new user message + the reconstructed assistant reply.
-    - Title rule mirrors front-end App.jsx:756-758: keep existing if any,
-      else first 48 chars of the first user message + '…' if truncated.
-    - Writes go to JSON first (via _save_convs) then SQLite shadow, matching
-      the existing PUT endpoint's order. SQLite failures only log.
+    - Prior messages are loaded from SQLite (single source of truth).
+    - Title rule mirrors front-end: keep existing if any, else first 48 chars
+      of the first user message + '…' if truncated.
     """
     save_conv_id = req_conv_id or session_id or msg_id
 
     chunks = await chat_store.get_chunks_after(msg_id, 0)
     assistant_msg = _build_assistant_msg_from_chunks(chunks)
 
-    convs = _load_convs()
-    existing = convs.get(save_conv_id)
+    existing = await chat_store.get_conversation(save_conv_id)
     prior_messages = (existing.get("messages") if existing else None) or []
 
     user_msg: dict = {"role": "user", "text": prompt}
@@ -415,30 +404,14 @@ async def _persist_conversation_after_turn(
     if not effective_model and existing:
         effective_model = existing.get("model")
 
-    conv = {
-        "id": save_conv_id,
-        "title": title,
-        "messages": new_messages,
-        "updatedAt": updated_at,
-        "sessionId": session_id,
-        "model": effective_model,
-    }
-    convs[save_conv_id] = conv
-    _save_convs(convs)
-
-    try:
-        await chat_store.upsert_conversation(
-            conv_id=save_conv_id,
-            title=title,
-            messages=new_messages,
-            updated_at=updated_at,
-            session_id=session_id,
-            model=effective_model,
-        )
-    except Exception:
-        logger.error(
-            f"SQLite shadow upsert failed for conv {save_conv_id}: {traceback.format_exc()}"
-        )
+    await chat_store.upsert_conversation(
+        conv_id=save_conv_id,
+        title=title,
+        messages=new_messages,
+        updated_at=updated_at,
+        session_id=session_id,
+        model=effective_model,
+    )
 
 
 async def _run_agent_persistent(
@@ -873,32 +846,15 @@ def _attach_image_urls(conversations: list[dict]) -> list[dict]:
 @limiter.limit("60/minute")
 async def list_conversations(request: Request, authorization: Optional[str] = Header(None)):
     verify_token(authorization)
-    if CONVERSATIONS_READ_SOURCE == "sqlite":
-        try:
-            items = await chat_store.list_conversations(limit=100)
-            return {"conversations": _attach_image_urls(items), "source": "sqlite"}
-        except Exception:
-            logger.error(
-                f"SQLite read failed, falling back to JSON: {traceback.format_exc()}"
-            )
-    convs = _load_convs()
-    items = sorted(convs.values(), key=lambda c: c.get("updatedAt", 0), reverse=True)
-    return {"conversations": _attach_image_urls(items[:100]), "source": "json"}
+    items = await chat_store.list_conversations(limit=100)
+    return {"conversations": _attach_image_urls(items)}
 
 
 @app.delete("/v1/conversations/{conv_id}")
 @limiter.limit("30/minute")
 async def delete_conversation(request: Request, conv_id: str, authorization: Optional[str] = Header(None)):
     verify_token(authorization)
-    convs = _load_convs()
-    convs.pop(conv_id, None)
-    _save_convs(convs)
-    try:
-        await chat_store.delete_conversation(conv_id)
-    except Exception:
-        logger.error(
-            f"SQLite shadow delete failed for conv {conv_id}: {traceback.format_exc()}"
-        )
+    await chat_store.delete_conversation(conv_id)
     return {"ok": True}
 
 
