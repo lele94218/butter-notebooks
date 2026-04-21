@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useCallback, useMemo, createContext, useContext } from 'react'
+import { useState, useRef, useEffect, useLayoutEffect, useCallback, useMemo, memo, createContext, useContext } from 'react'
 import MonacoEditor from '@monaco-editor/react'
 import { initVimMode } from 'monaco-vim'
 import ReactMarkdown from 'react-markdown'
@@ -173,7 +173,7 @@ function makeMdComponents(theme) {
 
 const katexOptions = { throwOnError: false, strict: false }
 
-function MdMessage({ text, streaming }) {
+const MdMessage = memo(function MdMessage({ text, streaming }) {
   const theme = useContext(ThemeContext)
   const mdComponents = useMemo(() => makeMdComponents(theme), [theme])
   return (
@@ -187,9 +187,12 @@ function MdMessage({ text, streaming }) {
       </ReactMarkdown>
     </div>
   )
-}
+})
 
 // ── Chat panel ─────────────────────────────────────────────
+const INITIAL_VISIBLE_MESSAGES = 20
+const MESSAGES_PAGE_SIZE = 20
+
 function ChatPanel({ sessionId, onSessionId, convId, initialMessages, onSaveConversation, model, onModelChange }) {
   const [messages, setMessages] = useState(initialMessages || [])
   const messagesRef = useRef(messages)
@@ -197,9 +200,13 @@ function ChatPanel({ sessionId, onSessionId, convId, initialMessages, onSaveConv
   const [loading, setLoading] = useState(false)
   const [status, setStatus] = useState('')
   const [attachments, setAttachments] = useState([])   // [{id, path, mime, url, preview, uploading, error}]
+  const [visibleCount, setVisibleCount] = useState(INITIAL_VISIBLE_MESSAGES)
+  const [isAtBottom, setIsAtBottom] = useState(true)
   const bottomRef = useRef(null)
   const textareaRef = useRef(null)
   const fileInputRef = useRef(null)
+  const chatAreaRef = useRef(null)
+  const prevScrollHeightRef = useRef(null)
 
   // Upload one File object; returns the backend response {path, mime, url}.
   const uploadFile = useCallback(async (file) => {
@@ -284,14 +291,44 @@ function ChatPanel({ sessionId, onSessionId, convId, initialMessages, onSaveConv
   // Keep ref in sync so done handler can read latest messages without stale closure
   useEffect(() => { messagesRef.current = messages }, [messages])
 
-  // Sync when switching conversations
+  // Sync when switching conversations — also reset pagination window to the tail
   useEffect(() => {
     setMessages(initialMessages || [])
+    setVisibleCount(INITIAL_VISIBLE_MESSAGES)
   }, [initialMessages])
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages])
+
+  const scrollToBottom = useCallback(() => {
+    bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
+    setIsAtBottom(true)
+  }, [])
+
+  // Scroll near the top → load older page. Record scrollHeight so we can
+  // restore viewport position after the prepend (otherwise view jumps).
+  const onChatScroll = useCallback((e) => {
+    const el = e.currentTarget
+    const atBottom = el.scrollTop + el.clientHeight >= el.scrollHeight - 60
+    setIsAtBottom(atBottom)
+    if (el.scrollTop < 40 && visibleCount < messagesRef.current.length) {
+      prevScrollHeightRef.current = el.scrollHeight
+      setVisibleCount(c => Math.min(messagesRef.current.length, c + MESSAGES_PAGE_SIZE))
+    }
+  }, [visibleCount])
+
+  // Preserve scroll anchor after older messages are prepended.
+  useLayoutEffect(() => {
+    if (prevScrollHeightRef.current != null && chatAreaRef.current) {
+      const el = chatAreaRef.current
+      el.scrollTop = el.scrollHeight - prevScrollHeightRef.current
+      prevScrollHeightRef.current = null
+    }
+  }, [visibleCount])
+
+  const visibleMessages = messages.slice(-visibleCount)
+  const hasMoreHistory = messages.length > visibleCount
 
   const send = useCallback(async () => {
     const text = input.trim()
@@ -453,42 +490,55 @@ function ChatPanel({ sessionId, onSessionId, convId, initialMessages, onSaveConv
           {sidCopied ? 'copied!' : `sid: ${sessionId ? sessionId.slice(0, 8) : '—'}`}
         </span>
       </div>
-      <div className="chat-area">
-        {messages.length === 0 && (
-          <div className="empty-state">
-            <h2>butter notebooks</h2>
-            <p>Chat with Claude. Files stay on your Mac mini.</p>
-          </div>
+      <div className="chat-area-wrap">
+        <div className="chat-area" ref={chatAreaRef} onScroll={onChatScroll}>
+          {messages.length === 0 && (
+            <div className="empty-state">
+              <h2>butter notebooks</h2>
+              <p>Chat with Claude. Files stay on your Mac mini.</p>
+            </div>
+          )}
+          {hasMoreHistory && (
+            <div className="history-more-hint">上滑加载更早的消息 ({messages.length - visibleCount})</div>
+          )}
+          {visibleMessages.map((msg, i) => (
+            <div key={(messages.length - visibleCount) + i} className={`message ${msg.role}`}>
+              {msg.role === 'assistant' ? (
+                <div className="msg-assistant">
+                  {msg.thinking ? <div className="msg-thinking">{msg.thinking}</div> : null}
+                  {msg.text === '' && msg.streaming
+                    ? <div className="thinking-dots"><span/><span/><span/></div>
+                    : msg.text === '' && !msg.streaming && !msg.thinking
+                      ? <div className="msg-empty">（无回复）</div>
+                      : msg.text
+                        ? <MdMessage text={msg.text} streaming={msg.streaming} />
+                        : null
+                  }
+                </div>
+              ) : (
+                <div className="msg-user-wrap">
+                  {msg.images && msg.images.length > 0 && (
+                    <div className="msg-images">
+                      {msg.images.map((im, j) =>
+                        im.url ? <AuthImage key={j} url={im.url} className="msg-image" alt="attached" /> : null
+                      )}
+                    </div>
+                  )}
+                  {msg.text ? <div className="msg-body">{msg.text}</div> : null}
+                </div>
+              )}
+            </div>
+          ))}
+          <div ref={bottomRef} />
+        </div>
+        {!isAtBottom && (
+          <button className="scroll-to-bottom" onClick={scrollToBottom} title="跳到最新">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+              <line x1="12" y1="5" x2="12" y2="19" />
+              <polyline points="19 12 12 19 5 12" />
+            </svg>
+          </button>
         )}
-        {messages.map((msg, i) => (
-          <div key={i} className={`message ${msg.role}`}>
-            {msg.role === 'assistant' ? (
-              <div className="msg-assistant">
-                {msg.thinking ? <div className="msg-thinking">{msg.thinking}</div> : null}
-                {msg.text === '' && msg.streaming
-                  ? <div className="thinking-dots"><span/><span/><span/></div>
-                  : msg.text === '' && !msg.streaming && !msg.thinking
-                    ? <div className="msg-empty">（无回复）</div>
-                    : msg.text
-                      ? <MdMessage text={msg.text} streaming={msg.streaming} />
-                      : null
-                }
-              </div>
-            ) : (
-              <div className="msg-user-wrap">
-                {msg.images && msg.images.length > 0 && (
-                  <div className="msg-images">
-                    {msg.images.map((im, j) =>
-                      im.url ? <AuthImage key={j} url={im.url} className="msg-image" alt="attached" /> : null
-                    )}
-                  </div>
-                )}
-                {msg.text ? <div className="msg-body">{msg.text}</div> : null}
-              </div>
-            )}
-          </div>
-        ))}
-        <div ref={bottomRef} />
       </div>
 
       <div className="input-area">
@@ -711,6 +761,7 @@ function CodePanel() {
   const sessionId = useRef('code-' + Math.random().toString(36).slice(2))
   const vimRef = useRef(null)
   const editorRef = useRef(null)
+  const saveFileRef = useRef(null)
 
   const loadDir = useCallback((path) => {
     fetch(`${API_BASE}/v1/files?path=${encodeURIComponent(path)}`, { headers: headers() })
@@ -749,6 +800,7 @@ function CodePanel() {
     }).catch(() => {})
     setSaving(false)
   }
+  saveFileRef.current = saveFile
 
   const runCode = async () => {
     setRunning(true)
@@ -853,10 +905,16 @@ function CodePanel() {
           <MonacoEditor
             height="100%"
             language="python"
-            theme={theme === 'dark' ? 'vs-dark' : 'light'}
+            theme={theme === 'dark' ? 'vs-dark' : 'vs'}
             value={code}
             onChange={v => setCode(v || '')}
-            onMount={editor => { editorRef.current = editor }}
+            onMount={(editor, monaco) => {
+              editorRef.current = editor
+              editor.addCommand(
+                monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS,
+                () => saveFileRef.current?.()
+              )
+            }}
             options={{
               fontSize: 13,
               minimap: { enabled: false },
@@ -864,6 +922,11 @@ function CodePanel() {
               wordWrap: 'on',
               lineNumbers: 'on',
               tabSize: 4,
+              quickSuggestions: false,
+              suggestOnTriggerCharacters: false,
+              acceptSuggestionOnCommitCharacter: false,
+              wordBasedSuggestions: 'off',
+              parameterHints: { enabled: false },
             }}
           />
         </div>

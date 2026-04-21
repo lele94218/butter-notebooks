@@ -853,6 +853,22 @@ async def read_note(request: Request, path: str = "", authorization: Optional[st
     return {"path": path, "content": target.read_text()}
 
 
+def _attach_image_urls(conversations: list[dict]) -> list[dict]:
+    """Backfill image.url from image.path for messages persisted before the
+    AuthImage migration — historical records only stored {path, mime}."""
+    for conv in conversations:
+        for msg in conv.get("messages") or []:
+            for img in msg.get("images") or []:
+                if img.get("url") or not img.get("path"):
+                    continue
+                try:
+                    rel = Path(img["path"]).resolve().relative_to(UPLOADS_ROOT_RESOLVED)
+                except (ValueError, OSError):
+                    continue
+                img["url"] = f"/v1/uploads/{rel.as_posix()}"
+    return conversations
+
+
 @app.get("/v1/conversations")
 @limiter.limit("60/minute")
 async def list_conversations(request: Request, authorization: Optional[str] = Header(None)):
@@ -860,14 +876,14 @@ async def list_conversations(request: Request, authorization: Optional[str] = He
     if CONVERSATIONS_READ_SOURCE == "sqlite":
         try:
             items = await chat_store.list_conversations(limit=100)
-            return {"conversations": items, "source": "sqlite"}
+            return {"conversations": _attach_image_urls(items), "source": "sqlite"}
         except Exception:
             logger.error(
                 f"SQLite read failed, falling back to JSON: {traceback.format_exc()}"
             )
     convs = _load_convs()
     items = sorted(convs.values(), key=lambda c: c.get("updatedAt", 0), reverse=True)
-    return {"conversations": items[:100], "source": "json"}
+    return {"conversations": _attach_image_urls(items[:100]), "source": "json"}
 
 
 @app.delete("/v1/conversations/{conv_id}")

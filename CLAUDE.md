@@ -19,6 +19,21 @@ Builds frontend with `npm run build`, then rsync's `dist/` to VPS:
 - Path: `/var/www/butter-notebooks/`
 - SSH key: `~/.ssh/id_ed25519`
 
+> ⚠️ **Always use `deploy.sh` — never bare `rsync -a`.**
+> `rsync -a` preserves the Mac's UID 501 / staff + `0600`/`0700` perms on the
+> webroot. nginx (www-data) then can't traverse the directory → site returns 403.
+> Happened twice: 2026-04-17 and 2026-04-19. `deploy.sh` sets `--chmod=D755,F644`
+> on transfer and runs `chown www-data:www-data` over the webroot afterwards,
+> skipping `_stats/` (goaccess-managed).
+>
+> If the site is already 403, recover manually with:
+> ```bash
+> ssh -i ~/.ssh/id_ed25519 root@vmi868767.your-tailnet.ts.net "
+>   chown -R www-data:www-data /var/www/butter-notebooks &&
+>   find /var/www/butter-notebooks -type d -exec chmod 755 {} \; &&
+>   find /var/www/butter-notebooks -type f -exec chmod 644 {} \;"
+> ```
+
 ## Backend (Mac Mini)
 
 ### Start / Restart

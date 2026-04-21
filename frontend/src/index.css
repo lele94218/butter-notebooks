@@ -74,8 +74,12 @@ html {
   background: hsl(60 2.6% 7.6%);
 }
 html[data-theme="light"] {
-  /* Propagate light-mode bg vars to body (body can't inherit from .app child) */
+  /* Propagate light-mode vars to body (body can't inherit from .app child).
+     --text is needed so body { color: var(--text) } gives dark text in light
+     mode — otherwise Monaco's body-level suggest widget inherits near-white
+     from :root and renders invisible text on a light background. */
   --bg4: hsl(220 14% 96%);
+  --text: hsl(60 2.6% 7.6%);
   background: hsl(220 14% 96%);
 }
 
@@ -106,3 +110,4 @@ body {
 ::-webkit-scrollbar-thumb { background: hsl(30 3.3% 20%); border-radius: 2px; }
 
 /* KaTeX — now imported via main.jsx to avoid @import-after-rules issue */
+
