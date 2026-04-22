@@ -478,7 +478,7 @@
 
 /* Code blocks — styled via SyntaxHighlighter's codeStyle object in App.jsx */
 .prose pre { margin: 0; }
-/* Ensure SyntaxHighlighter div wrapper fits in grid */
+/* SyntaxHighlighter rendered directly under .prose (legacy / no copy button) */
 .prose > div[class*="language-"],
 .prose > div:has(> pre[class*="language-"]) {
   min-width: 0;
@@ -487,6 +487,41 @@
   overflow-x: auto;
   overflow-y: hidden;
 }
+
+/* Wrapper added by CodeBlock component — only needs positioning context.
+   overflow is handled by the inner SyntaxHighlighter div (via customStyle). */
+.code-block-wrap {
+  position: relative;
+  min-width: 0;
+  max-width: 100%;
+}
+/* Reset .prose code inline-code padding/bg so it doesn't bleed into code blocks */
+.code-block-wrap code {
+  padding: 0;
+  background: none;
+  border-radius: 0;
+  color: inherit;
+}
+
+.code-copy-btn {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  background: var(--bg3);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--text3);
+  font-size: 11px;
+  font-family: var(--font-sans);
+  padding: 2px 8px;
+  cursor: pointer;
+  transition: color 0.15s, background 0.15s, opacity 0.15s;
+  opacity: 0;
+  z-index: 1;
+}
+.code-block-wrap:hover .code-copy-btn { opacity: 1; }
+.code-copy-btn:hover { color: var(--text); background: var(--bg2); }
+.code-copy-btn.copied { color: var(--accent); opacity: 1; }
 
 /* HR — thin divider */
 .prose hr {

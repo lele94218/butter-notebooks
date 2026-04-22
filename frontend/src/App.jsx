@@ -125,6 +125,34 @@ async function apiDeleteConv(id) {
   })
 }
 
+// ── Code block with copy button ────────────────────────────
+function CodeBlock({ lang, codeStyle, children }) {
+  const [copied, setCopied] = useState(false)
+  // Strip leading blank/whitespace-only line (common rendering artifact) + trailing newline
+  const text = String(children).replace(/^[^\S\n]*\n/, '').replace(/\n$/, '')
+  const copy = () => {
+    navigator.clipboard?.writeText(text).then(() => {
+      setCopied(true)
+      setTimeout(() => setCopied(false), 1500)
+    }).catch(() => {})
+  }
+  return (
+    <div className="code-block-wrap">
+      <SyntaxHighlighter
+        style={codeStyle}
+        language={lang || 'text'}
+        PreTag="div"
+        customStyle={{ margin: 0, overflowX: 'auto' }}
+      >
+        {text}
+      </SyntaxHighlighter>
+      <button className={`code-copy-btn${copied ? ' copied' : ''}`} onClick={copy}>
+        {copied ? '✓ copied' : 'copy'}
+      </button>
+    </div>
+  )
+}
+
 // ── Markdown renderer ──────────────────────────────────────
 function makeMdComponents(theme) {
   const base = theme === 'dark' ? oneDark : oneLight
@@ -149,21 +177,18 @@ function makeMdComponents(theme) {
     },
   }
   return {
+    // Strip the outer <pre> ReactMarkdown adds — CodeBlock handles its own container.
+    // Leaving the <pre> causes a <div>-inside-<pre> invalid structure and inherits
+    // white-space:pre on the wrapper div, shifting content.
+    pre({ children }) {
+      return <>{children}</>
+    },
     code({ className, children }) {
       const match = /language-(\w+)/.exec(className || '')
       const isBlock = !!match || String(children).includes('\n')
       if (!isBlock) return <code>{children}</code>
       const lang = match ? match[1] : ''
-      return (
-        <SyntaxHighlighter
-          style={codeStyle}
-          language={lang || 'text'}
-          PreTag="div"
-          customStyle={{ margin: 0 }}
-        >
-          {String(children).replace(/\n$/, '')}
-        </SyntaxHighlighter>
-      )
+      return <CodeBlock lang={lang} codeStyle={codeStyle}>{children}</CodeBlock>
     },
     table({ children }) {
       return <div className="table-scroll"><table>{children}</table></div>
