@@ -404,6 +404,12 @@ async def _persist_conversation_after_turn(
     if not effective_model and existing:
         effective_model = existing.get("model")
 
+    old_sid = existing.get("sessionId") if existing else None
+    if old_sid and session_id and old_sid != session_id:
+        logger.warning(
+            f"session_id overwrite: conv={save_conv_id} old={old_sid} new={session_id}"
+        )
+
     await chat_store.upsert_conversation(
         conv_id=save_conv_id,
         title=title,
@@ -474,6 +480,11 @@ async def _run_agent_persistent(
         # so persistence bugs can't break SSE delivery (we're past the yield
         # path here, but the task should still finish without a hard crash).
         if status == "done":
+            if session_id != new_session_id:
+                logger.warning(
+                    f"session_id changed during turn: "
+                    f"conv_id={conv_id} original={session_id} new={new_session_id}"
+                )
             try:
                 await _persist_conversation_after_turn(
                     conv_id, prompt, msg_id, new_session_id, model, images

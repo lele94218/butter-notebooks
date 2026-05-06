@@ -783,8 +783,27 @@ function CodePanel() {
   const [running, setRunning] = useState(false)
   const [saving, setSaving] = useState(false)
   const [vimMode, setVimMode] = useState(false)
+  const [outputHeight, setOutputHeight] = useState(200)
+  const [filetreeOpen, setFiletreeOpen] = useState(true)
   const sessionId = useRef('code-' + Math.random().toString(36).slice(2))
   const vimRef = useRef(null)
+  const dragRef = useRef(null)
+
+  const onResizeStart = useCallback((e) => {
+    e.preventDefault()
+    const startY = e.clientY
+    const startH = outputHeight
+    const onMove = (ev) => {
+      const delta = startY - ev.clientY
+      setOutputHeight(Math.max(60, Math.min(600, startH + delta)))
+    }
+    const onUp = () => {
+      document.removeEventListener('mousemove', onMove)
+      document.removeEventListener('mouseup', onUp)
+    }
+    document.addEventListener('mousemove', onMove)
+    document.addEventListener('mouseup', onUp)
+  }, [outputHeight])
   const editorRef = useRef(null)
   const saveFileRef = useRef(null)
 
@@ -830,6 +849,7 @@ function CodePanel() {
   const runCode = async () => {
     setRunning(true)
     setOutput([])
+    const t0 = performance.now()
     try {
       const res = await fetch(`${API_BASE}/v1/execute`, {
         method: 'POST',
@@ -856,6 +876,7 @@ function CodePanel() {
     } catch (e) {
       setOutput(prev => [...prev, { type: 'stderr', text: String(e) }])
     }
+    setOutput(prev => [...prev, { type: 'meta', text: `── done (${((performance.now() - t0) / 1000).toFixed(2)}s) ──\n` }])
     setRunning(false)
   }
 
@@ -875,29 +896,35 @@ function CodePanel() {
   return (
     <div className="code-panel">
       {/* File tree */}
-      <div className="code-filetree">
-        <div className="code-filetree-header">
-          {dirPath && <button className="code-up-btn" onClick={goUp} title="Up">‹</button>}
-          <span className="code-dir-label">{dirPath || '/'}</span>
-          <button className="code-refresh-btn" onClick={() => loadDir(dirPath)} title="Refresh">↺</button>
+      {filetreeOpen && (
+        <div className="code-filetree">
+          <div className="code-filetree-header">
+            {dirPath && <button className="code-up-btn" onClick={goUp} title="Up">‹</button>}
+            <span className="code-dir-label">{dirPath || '/'}</span>
+            <button className="code-refresh-btn" onClick={() => loadDir(dirPath)} title="Refresh">↺</button>
+            <button className="code-collapse-btn" onClick={() => setFiletreeOpen(false)} title="Collapse sidebar">«</button>
+          </div>
+          <div className="code-filetree-list">
+            {entries.map(e => (
+              <div
+                key={e.path}
+                className={`code-file-item ${openFile?.path === e.path ? 'active' : ''} ${e.is_dir ? 'is-dir' : ''}`}
+                onClick={() => openFileEntry(e)}
+              >
+                <span className="code-file-icon">{e.is_dir ? '📁' : '📄'}</span>
+                <span className="code-file-name">{e.name}</span>
+              </div>
+            ))}
+          </div>
         </div>
-        <div className="code-filetree-list">
-          {entries.map(e => (
-            <div
-              key={e.path}
-              className={`code-file-item ${openFile?.path === e.path ? 'active' : ''} ${e.is_dir ? 'is-dir' : ''}`}
-              onClick={() => openFileEntry(e)}
-            >
-              <span className="code-file-icon">{e.is_dir ? '📁' : '📄'}</span>
-              <span className="code-file-name">{e.name}</span>
-            </div>
-          ))}
-        </div>
-      </div>
+      )}
 
       {/* Editor + output */}
       <div className="code-main">
         <div className="code-toolbar">
+          {!filetreeOpen && (
+            <button className="code-btn code-expand-btn" onClick={() => setFiletreeOpen(true)} title="Show file tree">»</button>
+          )}
           <span className="code-filename">{openFile ? openFile.path : '—'}</span>
           <button className="code-btn code-run-btn" onClick={runCode} disabled={running}>
             {running ? '⏳' : '▶ Run'}
@@ -956,7 +983,8 @@ function CodePanel() {
           />
         </div>
 
-        <div className="code-output">
+        <div className="code-resize-handle" onMouseDown={onResizeStart} />
+        <div className="code-output" style={{ height: outputHeight }}>
           {output.length === 0 && !running && (
             <span className="code-output-empty">Run code to see output</span>
           )}
@@ -965,7 +993,7 @@ function CodePanel() {
               return <img key={i} src={`data:image/png;base64,${ev.data}`} className="code-output-img" alt="plot" />
             }
             return (
-              <pre key={i} className={`code-output-text ${ev.type === 'stderr' ? 'code-output-err' : ''}`}>
+              <pre key={i} className={`code-output-text ${ev.type === 'stderr' ? 'code-output-err' : ''} ${ev.type === 'meta' ? 'code-output-meta' : ''}`}>
                 {ev.text}
               </pre>
             )
@@ -1015,6 +1043,7 @@ export default function App() {
   const [tab, setTab] = useState(() => localStorage.getItem('butter_last_tab') || 'chat')
   const [sidebarTab, setSidebarTab] = useState('chats') // 'chats' | 'notes'
   const [sidebarOpen, setSidebarOpen] = useState(false)
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
 
   // Conversation history
   const [conversations, setConversations] = useState([])
@@ -1098,9 +1127,10 @@ export default function App() {
       {sidebarOpen && <div className="sidebar-backdrop" onClick={() => setSidebarOpen(false)} />}
 
       {/* Sidebar */}
-      <div className={`sidebar ${sidebarOpen ? 'sidebar--open' : ''}`}>
+      <div className={`sidebar ${sidebarOpen ? 'sidebar--open' : ''} ${sidebarCollapsed ? 'sidebar--collapsed' : ''}`}>
         <div className="sidebar-header">
           <span>butter notebooks</span>
+          <button className="sidebar-collapse-btn" onClick={() => setSidebarCollapsed(c => !c)} title={sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}>{sidebarCollapsed ? '»' : '«'}</button>
           <button className="sidebar-close-btn" onClick={() => setSidebarOpen(false)}>✕</button>
           <div className="sidebar-tabs">
             <button
