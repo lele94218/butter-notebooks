@@ -1,0 +1,21 @@
+.note-panel {
+  flex: 1;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: var(--note-padding);
+  touch-action: pan-y;
+  -webkit-overflow-scrolling: touch;
+}
+
+.note-content {
+  max-width: var(--content-width);
+  margin: 0 auto;
+  width: 100%;
+  min-width: 0;
+  overflow-wrap: break-word;
+  word-break: break-word;
+}
+
+@media (max-width: 600px) {
+  .note-panel { -webkit-overflow-scrolling: touch; }
+}
