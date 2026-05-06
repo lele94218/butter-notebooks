@@ -2,52 +2,113 @@
 
 Claude-powered Markdown notebook web app with chat, notes viewer, and Python code sandbox.
 
-## Architecture
+## Architecture Overview
 
-- **Frontend**: React + Vite → deployed to VPS via rsync
+```
+┌─────────────────────────────────────────────────────────────┐
+│  Browser (https://your-site.example.com)                            │
+│  React + Vite SPA                                           │
+└──────────────────────┬──────────────────────────────────────┘
+                       │ HTTPS (Tailscale / nginx reverse proxy)
+┌──────────────────────▼──────────────────────────────────────┐
+│  VPS (vmi868767.your-tailnet.ts.net)                          │
+│  nginx serves static dist/ + proxies /v1/* to Mac Mini      │
+└──────────────────────┬──────────────────────────────────────┘
+                       │ Tailscale internal
+┌──────────────────────▼──────────────────────────────────────┐
+│  Mac Mini (local)   port 8765                               │
+│  FastAPI (uvicorn)                                          │
+│  ├── Claude CLI subprocess (--resume, stream-json)          │
+│  ├── Python kernel (code sandbox via exec)                  │
+│  ├── SQLite WAL (chat.db at ~/.butter-notebooks/)           │
+│  └── iCloud Drive (Obsidian notes, read-only)               │
+└─────────────────────────────────────────────────────────────┘
+```
+
+- **Frontend**: React + Vite → built and rsync'd to VPS
 - **Backend**: FastAPI + Claude CLI subprocess → runs on Mac Mini (port 8765)
+- **Data**: SQLite at `~/.butter-notebooks/chat.db` (conversations, messages, chunks)
 - **Live URL**: https://your-site.example.com
 
-## Deploy Frontend
+## Frontend Structure
 
-```bash
-bash deploy.sh
+```
+frontend/src/
+├── App.jsx              # Layout shell: auth, theme, sidebar, tab routing (~175 lines)
+├── App.css              # Layout + sidebar + shared .prose styles (~380 lines)
+├── lib/
+│   ├── constants.js     # API_BASE, TOKEN_KEY, MODELS, DEFAULT_MODEL
+│   ├── api.js           # getToken, headers, fetchConversations, apiDeleteConv
+│   └── theme.js         # ThemeContext, applyThemeColor
+└── components/
+    ├── ChatPanel.jsx/css    # SSE streaming chat, model selector, image attachments
+    ├── NotesPanel.jsx/css   # Markdown note viewer (read-only from Obsidian vault)
+    ├── CodePanel.jsx/css    # Monaco editor, file tree, Python kernel execution
+    ├── LoginScreen.jsx/css  # Token-based auth
+    ├── MdMessage.jsx        # Memo-wrapped Markdown renderer (shared by Chat + Notes)
+    ├── CodeBlock.jsx        # SyntaxHighlighter + copy button
+    ├── FileTree.jsx         # Recursive sidebar file tree + buildTree helper
+    └── AuthImage.jsx        # Blob URL auth image loader
 ```
 
-Builds frontend with `npm run build`, then rsync's `dist/` to VPS:
-- Host: `root@vmi868767.your-tailnet.ts.net`
-- Path: `/var/www/butter-notebooks/`
-- SSH key: `~/.ssh/id_ed25519`
+## Backend Structure
 
-> ⚠️ **Always use `deploy.sh` — never bare `rsync -a`.**
-> `rsync -a` preserves the Mac's UID 501 / staff + `0600`/`0700` perms on the
-> webroot. nginx (www-data) then can't traverse the directory → site returns 403.
-> Happened twice: 2026-04-17 and 2026-04-19. `deploy.sh` sets `--chmod=D755,F644`
-> on transfer and runs `chown www-data:www-data` over the webroot afterwards,
-> skipping `_stats/` (goaccess-managed).
->
-> If the site is already 403, recover manually with:
-> ```bash
-> ssh -i ~/.ssh/id_ed25519 root@vmi868767.your-tailnet.ts.net "
->   chown -R www-data:www-data /var/www/butter-notebooks &&
->   find /var/www/butter-notebooks -type d -exec chmod 755 {} \; &&
->   find /var/www/butter-notebooks -type f -exec chmod 644 {} \;"
-> ```
+```
+backend/
+├── main.py              # FastAPI app: chat SSE, notes, files, code execution routes
+├── chat_store.py        # SQLite WAL: conversations, messages, message_chunks
+├── kernel.py            # Python subprocess sandbox (exec + matplotlib capture)
+├── kernel_manager.py    # Kernel lifecycle management
+├── tts.py               # Text-to-speech (Edge TTS)
+├── stt.py               # Speech-to-text
+└── .env                 # Runtime config (API_TOKEN, paths, etc.)
+```
 
-## Backend (Mac Mini)
+## Session & Conversation Model
 
-### Start / Restart
+```
+Frontend (convId)                    Backend (session_id)
+─────────────────                    ────────────────────
+convId = stable UUID                 session_id = Claude CLI --resume token
+assigned on first send               returned by CLI, stored in chat.db
+sent as conv_id in every request     looked up from DB, never sent by frontend
+```
+
+- **convId** (frontend): Stable conversation identifier. Generated once via `crypto.randomUUID()` on first message, then reused for all subsequent turns.
+- **session_id** (backend-only): Claude CLI `--resume` token. Backend looks it up from `conversations.session_id` in SQLite when processing a chat request. Frontend never sees or sends it.
+- After each turn, `_persist_conversation_after_turn` saves the (possibly new) `session_id` from Claude CLI back to the DB.
+- **Important**: Deploying frontend changes that touch the chat flow requires restarting the backend too (`launchctl kickstart`), since the backend is not auto-reloaded.
+
+## Deploy
 
 ```bash
-launchctl kickstart -k gui/$(id -u)/ai.openclaw.butter-notebooks
+./deploy.sh              # frontend only (build + rsync to VPS)
+./deploy.sh --frontend   # same as above
+./deploy.sh --backend    # restart backend only (launchctl kickstart)
+./deploy.sh --all        # frontend + backend
 ```
+
+- Frontend: builds with `npm run build`, rsync's to VPS, fixes perms
+- Backend: `launchctl kickstart -k` the plist, verifies process started
+- VPS host: `root@vmi868767.your-tailnet.ts.net`, path `/var/www/butter-notebooks/`
+
+> **Never bare `rsync -a`** — preserves Mac UID/perms → nginx 403.
+> `deploy.sh` runs `chmod` + `chown www-data` after transfer.
+
+> **If frontend and backend touch the same API contract, use `--all`.**
+> Otherwise the mismatch causes silent failures (e.g. frontend stops sending
+> a field the old backend still expects).
 
 ### Config
 
-- **plist**: `~/Library/LaunchAgents/ai.openclaw.butter-notebooks.plist`
-- **launcher**: `/Applications/ButterNotebooks.app/Contents/MacOS/butter-notebooks`
-- **env**: `backend/.env`
-- **logs**: `/tmp/butter-notebooks.log`
+| Item | Path |
+|------|------|
+| plist | `~/Library/LaunchAgents/ai.openclaw.butter-notebooks.plist` |
+| launcher | `/Applications/ButterNotebooks.app/Contents/MacOS/butter-notebooks` |
+| env | `backend/.env` |
+| logs | `/tmp/butter-notebooks.log` |
+| database | `~/.butter-notebooks/chat.db` |
+| nginx config | `infra/nginx/your-site.example.com.conf` |
 
 ### Key env vars
 
@@ -56,23 +117,25 @@ API_TOKEN=...
 NOTES_ROOT=/Users/you/Library/Mobile Documents/iCloud~md~obsidian/Documents/claw-learning
 CODE_ROOT=/Users/you/works/deep-learnings
 SANDBOX_PYTHON=/Users/you/works/ComfyUI/venv/bin/python3
+TTS_ENGINE=edge
 ```
 
-### Notes
+## Backend Notes
 
 - Must use `--loop asyncio` (uvloop hangs under launchd)
-- Homebrew `Python.app` needs **Full Disk Access** (FDA) in System Settings > Privacy & Security for iCloud Drive access:
+- Homebrew `Python.app` needs **Full Disk Access** (FDA) for iCloud Drive:
   `/opt/homebrew/Cellar/python@3.13/3.13.12_1/Frameworks/Python.framework/Versions/3.13/Resources/Python.app`
-  (If Python version upgrades, Cellar path changes — re-grant FDA)
-- Backend venv uses Homebrew Python 3.13: `backend/.venv`
-- Code sandbox uses ComfyUI venv (has torch 2.10.0 / numpy / matplotlib): `SANDBOX_PYTHON` env var
-- File scan for notes uses `subprocess find` (not `rglob`) to avoid blocking asyncio event loop under launchd TCC restrictions
+  (Python version upgrade → Cellar path changes → re-grant FDA)
+- Backend venv: Homebrew Python 3.13 (`backend/.venv`)
+- Code sandbox venv: ComfyUI (`SANDBOX_PYTHON`, has torch/numpy/matplotlib)
+- Notes file scan uses `subprocess find` (not `rglob`) to avoid blocking asyncio under launchd TCC
 
 ## Known Issues / Gotchas
 
-- **iOS scroll on notes**: Only `.note-panel` should be a scroll container. Inner elements (`.prose` etc.) must have `overflow: visible`, not `overflow: hidden/auto`, or iOS creates a second scroll context that blocks touch events.
-- **Claude session_id vs convId**: Claude CLI returns a new `session_id` on every `--resume` call. Frontend keeps a stable `convId` (UUID) separate from `sessionId` (for `--resume` only). Don't conflate them.
-- **Extended thinking**: Claude thinking blocks come as `type: 'thinking'` SSE events, not `delta`. Frontend renders them as a dimmed block above the response.
+- **iOS scroll**: Only `.note-panel` should be a scroll container. Inner `.prose` must have `overflow: visible`, not `hidden/auto`, or iOS creates a second scroll context.
+- **Extended thinking**: Claude thinking blocks arrive as `type: 'thinking'` SSE events. Frontend renders them dimmed above the response.
+- **Kernel plots**: `kernel.py` patches matplotlib to Agg backend and captures figures via `_capture_figure()`. User code just calls `plt.show()` — output streams as base64 PNG via SSE.
+- **Frontend + backend deploy mismatch**: Frontend deploys instantly (rsync to VPS), backend requires `launchctl kickstart`. If they touch the same API contract, deploy both and restart backend.
 
 ## Development
 
@@ -80,6 +143,6 @@ SANDBOX_PYTHON=/Users/you/works/ComfyUI/venv/bin/python3
 # Frontend dev server
 cd frontend && npm run dev
 
-# Backend dev
+# Backend dev (with auto-reload)
 cd backend && .venv/bin/python -m uvicorn main:app --reload --port 8765
 ```
