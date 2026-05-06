@@ -366,14 +366,10 @@ async def _persist_conversation_after_turn(
 ):
     """Build the merged messages array for this turn and write to SQLite.
 
-    - conv_id resolution mirrors the front-end: prefer req_conv_id, else fall
-      back to the latest claude session_id (used as the stable id for a brand
-      new conversation's first turn).
-    - Prior messages are loaded from SQLite (single source of truth).
-    - Title rule mirrors front-end: keep existing if any, else first 48 chars
-      of the first user message + '…' if truncated.
+    conv_id is always provided by the frontend. session_id is looked up from
+    the DB and may be updated if Claude CLI returns a new one.
     """
-    save_conv_id = req_conv_id or session_id or msg_id
+    save_conv_id = req_conv_id or msg_id
 
     chunks = await chat_store.get_chunks_after(msg_id, 0)
     assistant_msg = _build_assistant_msg_from_chunks(chunks)
@@ -585,9 +581,13 @@ async def chat(request: Request, req: ChatRequest, authorization: Optional[str] 
     conv_id = req.conv_id or "default"
     msg_id = await chat_store.create_message(conv_id, req.msg_id)
 
+    # Look up session_id from DB — frontend no longer tracks it
+    existing_conv = await chat_store.get_conversation(conv_id)
+    session_id = existing_conv.get("sessionId") if existing_conv else None
+
     task = asyncio.create_task(
         _run_agent_persistent(
-            msg_id, req.message, req.session_id, req.conv_id, req.model, images
+            msg_id, req.message, session_id, req.conv_id, req.model, images
         )
     )
     _agent_tasks[msg_id] = task
