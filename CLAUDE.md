@@ -12,7 +12,7 @@ Claude-powered Markdown notebook web app with chat, notes viewer, and Python cod
                        │ HTTPS (Tailscale / nginx reverse proxy)
 ┌──────────────────────▼──────────────────────────────────────┐
 │  VPS (vmi868767.your-tailnet.ts.net)                          │
-│  nginx serves static dist/ + proxies /v1/* to Mac Mini      │
+│  nginx serves static dist/ + proxies /v1/* & /jupyter/*     │
 └──────────────────────┬──────────────────────────────────────┘
                        │ Tailscale internal
 ┌──────────────────────▼──────────────────────────────────────┐
@@ -20,6 +20,7 @@ Claude-powered Markdown notebook web app with chat, notes viewer, and Python cod
 │  FastAPI (uvicorn)                                          │
 │  ├── Claude CLI subprocess (--resume, stream-json)          │
 │  ├── Python kernel (code sandbox via exec)                  │
+│  ├── Jupyter Notebook (port 8888, /jupyter/)                │
 │  ├── SQLite WAL (chat.db at ~/.butter-notebooks/)           │
 │  └── iCloud Drive (Obsidian notes, read-only)               │
 └─────────────────────────────────────────────────────────────┘
@@ -44,6 +45,7 @@ frontend/src/
     ├── ChatPanel.jsx/css    # SSE streaming chat, model selector, image attachments
     ├── NotesPanel.jsx/css   # Markdown note viewer (read-only from Obsidian vault)
     ├── CodePanel.jsx/css    # Monaco editor, file tree, Python kernel execution
+    ├── NotebookPanel.jsx/css # Embedded JupyterLab iframe with token auth + loading bar
     ├── LoginScreen.jsx/css  # Token-based auth
     ├── MdMessage.jsx        # Memo-wrapped Markdown renderer (shared by Chat + Notes)
     ├── CodeBlock.jsx        # SyntaxHighlighter + copy button
@@ -118,6 +120,8 @@ NOTES_ROOT=/Users/you/Library/Mobile Documents/iCloud~md~obsidian/Documents/claw
 CODE_ROOT=/Users/you/works/deep-learnings
 SANDBOX_PYTHON=/Users/you/works/ComfyUI/venv/bin/python3
 TTS_ENGINE=edge
+JUPYTER_TOKEN=...           # must match --NotebookApp.token= on jupyter-notebook
+JUPYTER_BASE_URL=/jupyter/  # must match --NotebookApp.base_url=
 ```
 
 ## Backend Notes
@@ -129,6 +133,7 @@ TTS_ENGINE=edge
 - Backend venv: Homebrew Python 3.13 (`backend/.venv`)
 - Code sandbox venv: ComfyUI (`SANDBOX_PYTHON`, has torch/numpy/matplotlib)
 - Notes file scan uses `subprocess find` (not `rglob`) to avoid blocking asyncio under launchd TCC
+- Jupyter runs from ComfyUI venv (`/Users/you/works/ComfyUI/venv/bin/jupyter-notebook`), port 8888, `--ip=0.0.0.0`. Must listen on all interfaces for Tailscale proxy to reach it. nginx strips `X-Frame-Options` and `Content-Security-Policy` headers to allow iframe embedding.
 
 ## Known Issues / Gotchas
 
@@ -136,6 +141,7 @@ TTS_ENGINE=edge
 - **Extended thinking**: Claude thinking blocks arrive as `type: 'thinking'` SSE events. Frontend renders them dimmed above the response.
 - **Kernel plots**: `kernel.py` patches matplotlib to Agg backend and captures figures via `_capture_figure()`. User code just calls `plt.show()` — output streams as base64 PNG via SSE.
 - **Frontend + backend deploy mismatch**: Frontend deploys instantly (rsync to VPS), backend requires `launchctl kickstart`. If they touch the same API contract, deploy both and restart backend.
+- **Jupyter iframe**: Embedded via `/jupyter/lab` (JupyterLab SPA) so files open inside the iframe, not in new browser tabs. Token is fetched from `/v1/jupyter-token` (auth-gated) and passed via URL param. Jupyter must be started with `--ip=0.0.0.0 --NotebookApp.base_url=/jupyter/ --NotebookApp.token=<TOKEN> --NotebookApp.allow_origin=https://your-site.example.com`.
 
 ## Development
 
