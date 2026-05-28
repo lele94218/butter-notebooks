@@ -1,3 +1,72 @@
+.notes-layout {
+  display: flex;
+  flex: 1;
+  overflow: hidden;
+  height: 100%;
+}
+
+.notes-filetree {
+  width: 200px;
+  min-width: 160px;
+  border-right: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  flex-shrink: 0;
+}
+.notes-filetree-header {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--border);
+  font-size: 0.75em;
+  color: var(--text2);
+  min-height: 0;
+}
+.notes-filetree-title {
+  flex: 1;
+  font-weight: 500;
+}
+.notes-refresh-btn,
+.notes-collapse-btn {
+  background: none;
+  border: none;
+  color: var(--text2);
+  cursor: pointer;
+  padding: 0 2px;
+  font-size: 1em;
+  line-height: 1;
+}
+.notes-refresh-btn:hover,
+.notes-collapse-btn:hover {
+  color: var(--text);
+}
+.notes-filetree-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 4px 0;
+}
+
+.notes-expand-btn {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  z-index: 1;
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  color: var(--text2);
+  cursor: pointer;
+  font-size: 0.85em;
+  padding: 2px 6px;
+  line-height: 1;
+}
+.notes-expand-btn:hover {
+  color: var(--text);
+  background: var(--bg3);
+}
+
 .note-panel {
   flex: 1;
   overflow-y: auto;
@@ -5,6 +74,7 @@
   padding: var(--note-padding);
   touch-action: pan-y;
   -webkit-overflow-scrolling: touch;
+  position: relative;
 }
 
 .note-content {
@@ -17,5 +87,6 @@
 }
 
 @media (max-width: 600px) {
+  .notes-filetree { display: none; }
   .note-panel { -webkit-overflow-scrolling: touch; }
 }

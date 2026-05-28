@@ -40,6 +40,9 @@ function makeMdComponents(theme) {
       const lang = match ? match[1] : ''
       return <CodeBlock lang={lang} codeStyle={codeStyle}>{children}</CodeBlock>
     },
+    a({ href, children }) {
+      return <a href={href} target="_blank" rel="noopener noreferrer">{children}</a>
+    },
     table({ children }) {
       return <div className="table-scroll"><table>{children}</table></div>
     },

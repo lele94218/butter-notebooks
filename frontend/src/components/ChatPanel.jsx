@@ -8,7 +8,7 @@ import './ChatPanel.css'
 const INITIAL_VISIBLE_MESSAGES = 20
 const MESSAGES_PAGE_SIZE = 20
 
-export default function ChatPanel({ convId, initialMessages, onSaveConversation, model, onModelChange }) {
+export default function ChatPanel({ convId, initialSessionId, initialMessages, onSaveConversation, model, onModelChange }) {
   const [messages, setMessages] = useState(initialMessages || [])
   const messagesRef = useRef(messages)
   const [input, setInput] = useState('')
@@ -17,6 +17,7 @@ export default function ChatPanel({ convId, initialMessages, onSaveConversation,
   const [attachments, setAttachments] = useState([])
   const [visibleCount, setVisibleCount] = useState(INITIAL_VISIBLE_MESSAGES)
   const [isAtBottom, setIsAtBottom] = useState(true)
+  const [sessionId, setSessionId] = useState(initialSessionId || null)
   const bottomRef = useRef(null)
   const textareaRef = useRef(null)
   const fileInputRef = useRef(null)
@@ -107,6 +108,85 @@ export default function ChatPanel({ convId, initialMessages, onSaveConversation,
     setVisibleCount(INITIAL_VISIBLE_MESSAGES)
   }, [initialMessages])
 
+  const processStream = useCallback(async (reader, { onDone } = {}) => {
+    const decoder = new TextDecoder()
+    let buf = ''
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+      buf += decoder.decode(value, { stream: true })
+      const lines = buf.split('\n')
+      buf = lines.pop()
+      for (const line of lines) {
+        if (!line.startsWith('data: ')) continue
+        const payload = line.slice(6)
+        if (payload === '[DONE]') continue
+        try {
+          const data = JSON.parse(payload)
+          if (data.type === 'session') {
+            if (data.session_id) setSessionId(data.session_id)
+          } else if (data.type === 'thinking') {
+            setMessages(prev => {
+              const msgs = [...prev]
+              msgs[msgs.length - 1] = {
+                ...msgs[msgs.length - 1],
+                thinking: (msgs[msgs.length - 1].thinking || '') + data.text,
+              }
+              return msgs
+            })
+          } else if (data.type === 'delta') {
+            setMessages(prev => {
+              const msgs = [...prev]
+              msgs[msgs.length - 1] = {
+                ...msgs[msgs.length - 1],
+                text: msgs[msgs.length - 1].text + data.text,
+              }
+              return msgs
+            })
+          } else if (data.type === 'done') {
+            setMessages(prev => {
+              const finalMsgs = prev.map((m, i) =>
+                i === prev.length - 1 ? { ...m, streaming: false } : m
+              )
+              onDone?.(finalMsgs)
+              return finalMsgs
+            })
+          } else if (data.type === 'error') {
+            setStatus(`error: ${data.text}`)
+          }
+        } catch {}
+      }
+    }
+  }, [])
+
+  useEffect(() => {
+    if (!convId) return
+    let cancelled = false
+    ;(async () => {
+      try {
+        const r = await fetch(`${API_BASE}/v1/chat/pending/${convId}`, { headers: headers() })
+        const d = await r.json()
+        if (cancelled || !d.msg_id) return
+
+        setMessages(prev => {
+          if (prev.length > 0 && prev[prev.length - 1].streaming) return prev
+          return [...prev, { role: 'assistant', text: '', thinking: '', streaming: true }]
+        })
+        setLoading(true)
+        setStatus('reconnecting to stream...')
+
+        const res = await fetch(`${API_BASE}/v1/chat/resume/${d.msg_id}`, { headers: headers() })
+        if (cancelled) return
+        setStatus('')
+        await processStream(res.body.getReader(), {
+          onDone: (finalMsgs) => onSaveConversation(finalMsgs, null, convId),
+        })
+      } catch {}
+      if (!cancelled) { setLoading(false); setStatus('') }
+    })()
+    return () => { cancelled = true }
+  }, [convId])
+
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages])
@@ -168,6 +248,13 @@ export default function ChatPanel({ convId, initialMessages, onSaveConversation,
 
     setMessages(prev => [...prev, userMsg, assistantMsg])
 
+    let waitTimer = null
+    let waitSeconds = 0
+    waitTimer = setInterval(() => {
+      waitSeconds++
+      setStatus(`waiting for Claude... ${waitSeconds}s`)
+    }, 1000)
+
     try {
       const res = await fetch(`${API_BASE}/v1/chat`, {
         method: 'POST',
@@ -180,61 +267,15 @@ export default function ChatPanel({ convId, initialMessages, onSaveConversation,
         }),
       })
 
-      const reader = res.body.getReader()
-      const decoder = new TextDecoder()
-      let buf = ''
-
-      while (true) {
-        const { done, value } = await reader.read()
-        if (done) break
-        buf += decoder.decode(value, { stream: true })
-        const lines = buf.split('\n')
-        buf = lines.pop()
-
-        for (const line of lines) {
-          if (!line.startsWith('data: ')) continue
-          const payload = line.slice(6)
-          if (payload === '[DONE]') continue
-          try {
-            const data = JSON.parse(payload)
-            if (data.type === 'session') {
-              // session_id managed server-side only
-            } else if (data.type === 'thinking') {
-              setMessages(prev => {
-                const msgs = [...prev]
-                msgs[msgs.length - 1] = {
-                  ...msgs[msgs.length - 1],
-                  thinking: (msgs[msgs.length - 1].thinking || '') + data.text,
-                }
-                return msgs
-              })
-            } else if (data.type === 'delta') {
-              setMessages(prev => {
-                const msgs = [...prev]
-                msgs[msgs.length - 1] = {
-                  ...msgs[msgs.length - 1],
-                  text: msgs[msgs.length - 1].text + data.text,
-                }
-                return msgs
-              })
-              setStatus('')
-            } else if (data.type === 'done') {
-              setMessages(prev => {
-                const finalMsgs = prev.map((m, i) =>
-                  i === prev.length - 1 ? { ...m, streaming: false } : m
-                )
-                onSaveConversation(finalMsgs, text, effectiveConvId)
-                return finalMsgs
-              })
-            } else if (data.type === 'error') {
-              setStatus(`error: ${data.text}`)
-            }
-          } catch {}
-        }
-      }
+      if (waitTimer) { clearInterval(waitTimer); waitTimer = null }
+      setStatus('')
+      await processStream(res.body.getReader(), {
+        onDone: (finalMsgs) => onSaveConversation(finalMsgs, text, effectiveConvId),
+      })
     } catch (e) {
       setStatus(`error: ${e.message}`)
     } finally {
+      if (waitTimer) { clearInterval(waitTimer); waitTimer = null }
       setLoading(false)
       setStatus('')
     }
@@ -242,16 +283,17 @@ export default function ChatPanel({ convId, initialMessages, onSaveConversation,
 
   const [sidCopied, setSidCopied] = useState(false)
   const copySid = useCallback(() => {
-    if (!convId) return
+    const id = sessionId || convId
+    if (!id) return
     try {
-      navigator.clipboard?.writeText(convId)
+      navigator.clipboard?.writeText(id)
       setSidCopied(true)
       setTimeout(() => setSidCopied(false), 1200)
     } catch {}
-  }, [convId])
+  }, [sessionId, convId])
 
   const onKeyDown = (e) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
+    if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
       e.preventDefault()
       send()
     }
@@ -279,10 +321,10 @@ export default function ChatPanel({ convId, initialMessages, onSaveConversation,
         </select>
         <span
           className={`sid-pill${sidCopied ? ' sid-pill--copied' : ''}`}
-          title={convId ? `conv: ${convId} (click to copy)` : 'new conversation'}
+          title={sessionId ? `session: ${sessionId}\nconv: ${convId}` : convId ? `conv: ${convId}` : 'new conversation'}
           onClick={copySid}
         >
-          {sidCopied ? 'copied!' : `id: ${convId ? convId.slice(0, 8) : '---'}`}
+          {sidCopied ? 'copied!' : `s: ${sessionId ? sessionId.slice(0, 8) : '---'}`}
         </span>
       </div>
       <div className="chat-area-wrap">

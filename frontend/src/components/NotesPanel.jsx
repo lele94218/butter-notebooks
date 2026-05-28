@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useContext } from 'react'
+import { useState, useEffect, useMemo, useCallback, useContext } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkMath from 'remark-math'
 import remarkGfm from 'remark-gfm'
@@ -7,13 +7,33 @@ import { API_BASE } from '../lib/constants'
 import { headers } from '../lib/api'
 import { ThemeContext } from '../lib/theme'
 import { makeMdComponents, katexOptions } from './MdMessage'
+import FileTree, { buildTree } from './FileTree'
 import './NotesPanel.css'
 
-export default function NotesPanel({ selectedNote }) {
+export default function NotesPanel() {
   const theme = useContext(ThemeContext)
   const mdComponents = useMemo(() => makeMdComponents(theme), [theme])
+
+  const [notes, setNotes] = useState([])
+  const [selectedNote, setSelectedNote] = useState(() => localStorage.getItem('butter_last_note') || null)
+  const [openDirs, setOpenDirs] = useState({})
   const [content, setContent] = useState('')
   const [loading, setLoading] = useState(false)
+  const [treeOpen, setTreeOpen] = useState(true)
+
+  const refreshNotes = useCallback(() => {
+    fetch(`${API_BASE}/v1/notes`, { headers: headers() })
+      .then(r => r.json())
+      .then(d => setNotes(d.files || []))
+      .catch(() => {})
+  }, [])
+
+  useEffect(() => { refreshNotes() }, [])
+
+  const selectNote = (f) => {
+    setSelectedNote(f)
+    localStorage.setItem('butter_last_note', f)
+  }
 
   useEffect(() => {
     if (!selectedNote) return
@@ -25,31 +45,51 @@ export default function NotesPanel({ selectedNote }) {
       .finally(() => setLoading(false))
   }, [selectedNote])
 
-  if (!selectedNote) {
-    return (
-      <div className="note-panel">
-        <div className="empty-state">
-          <h2>No note selected</h2>
-          <p>Pick a file from the sidebar</p>
-        </div>
-      </div>
-    )
-  }
-
   return (
-    <div className="note-panel">
-      <div className="note-content">
-        {loading ? (
-          <p style={{ color: 'var(--text2)' }}>Loading...</p>
+    <div className="notes-layout">
+      {treeOpen && (
+        <div className="notes-filetree">
+          <div className="notes-filetree-header">
+            <span className="notes-filetree-title">Notes</span>
+            <button className="notes-refresh-btn" onClick={refreshNotes} title="Refresh">&#8634;</button>
+            <button className="notes-collapse-btn" onClick={() => setTreeOpen(false)} title="Collapse">&laquo;</button>
+          </div>
+          <div className="notes-filetree-list">
+            <FileTree
+              tree={buildTree(notes)}
+              selectedNote={selectedNote}
+              onSelect={selectNote}
+              openDirs={openDirs}
+              toggleDir={key => setOpenDirs(prev => ({ ...prev, [key]: prev[key] === false ? true : false }))}
+            />
+          </div>
+        </div>
+      )}
+
+      <div className="note-panel">
+        {!treeOpen && (
+          <button className="notes-expand-btn" onClick={() => setTreeOpen(true)} title="Show file tree">&raquo;</button>
+        )}
+        {!selectedNote ? (
+          <div className="empty-state">
+            <h2>No note selected</h2>
+            <p>Pick a file from the tree</p>
+          </div>
         ) : (
-          <div className="prose">
-            <ReactMarkdown
-              remarkPlugins={[remarkGfm, remarkMath]}
-              rehypePlugins={[[rehypeKatex, katexOptions]]}
-              components={mdComponents}
-            >
-              {content}
-            </ReactMarkdown>
+          <div className="note-content">
+            {loading ? (
+              <p style={{ color: 'var(--text2)' }}>Loading...</p>
+            ) : (
+              <div className="prose">
+                <ReactMarkdown
+                  remarkPlugins={[remarkGfm, remarkMath]}
+                  rehypePlugins={[[rehypeKatex, katexOptions]]}
+                  components={mdComponents}
+                >
+                  {content}
+                </ReactMarkdown>
+              </div>
+            )}
           </div>
         )}
       </div>

@@ -24,7 +24,6 @@
   width: 42px;
   min-width: 42px;
 }
-.sidebar--collapsed .sidebar-tabs,
 .sidebar--collapsed .notes-list,
 .sidebar--collapsed .sidebar-footer {
   display: none;
@@ -66,38 +65,6 @@
   margin-top: -2px;
 }
 .sidebar-collapse-btn:hover { color: var(--text); }
-
-.sidebar-tabs {
-  display: flex;
-  gap: 2px;
-}
-
-.sidebar-tab {
-  flex: 1;
-  padding: 5px 0;
-  background: transparent;
-  border: 1px solid transparent;
-  border-radius: 6px;
-  color: var(--text2);
-  font-size: 12px;
-  cursor: pointer;
-  transition: background 0.1s, color 0.1s;
-}
-.sidebar-tab:hover { background: var(--bg3); color: var(--text); }
-.sidebar-tab.active { background: var(--bg3); color: var(--text); border-color: var(--border); }
-
-.refresh-notes-btn {
-  padding: 4px 6px;
-  background: transparent;
-  border: 1px solid transparent;
-  border-radius: 6px;
-  color: var(--text3);
-  font-size: 13px;
-  cursor: pointer;
-  line-height: 1;
-  transition: color 0.1s, background 0.1s;
-}
-.refresh-notes-btn:hover { color: var(--text); background: var(--bg3); }
 
 .notes-list {
   flex: 1;
@@ -509,7 +476,6 @@
 
   .sidebar-collapse-btn { display: none; }
   .sidebar--collapsed { width: 230px; min-width: 230px; }
-  .sidebar--collapsed .sidebar-tabs,
   .sidebar--collapsed .notes-list,
   .sidebar--collapsed .sidebar-footer,
   .sidebar--collapsed .sidebar-header > span { display: revert; }
@@ -517,7 +483,6 @@
   .note-item { padding: 10px 14px; font-size: 14px; }
   .tree-dir  { padding: 8px 8px 8px 0; font-size: 13px; }
   .tab       { padding: 12px 14px; font-size: 13px; }
-  .sidebar-tab { padding: 8px 0; font-size: 13px; }
 
   .conv-delete { opacity: 0.6; }
 }

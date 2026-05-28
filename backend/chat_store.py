@@ -94,7 +94,15 @@ class ChatStore:
             cols = {r[1] for r in conn.execute("PRAGMA table_info(conversations)").fetchall()}
             if "model" not in cols:
                 conn.execute("ALTER TABLE conversations ADD COLUMN model TEXT")
+            n = conn.execute(
+                "UPDATE messages SET status='error', error_text='server restarted', "
+                "finished_at=CAST(strftime('%%s','now')*1000 AS INTEGER) "
+                "WHERE status='streaming'"
+            ).rowcount
             conn.commit()
+            if n:
+                import logging
+                logging.getLogger("chat_store").warning(f"cleaned up {n} orphaned streaming message(s)")
         finally:
             conn.close()
 
@@ -201,6 +209,18 @@ class ChatStore:
         finally:
             conn.close()
 
+    def _get_streaming_msg_sync(self, conv_id: str) -> Optional[str]:
+        conn = self._conn()
+        try:
+            row = conn.execute(
+                "SELECT msg_id FROM messages WHERE conv_id=? AND status='streaming' "
+                "ORDER BY started_at DESC LIMIT 1",
+                (conv_id,),
+            ).fetchone()
+            return row[0] if row else None
+        finally:
+            conn.close()
+
     # --- async API --------------------------------------------------------
 
     async def create_message(
@@ -229,6 +249,9 @@ class ChatStore:
 
     async def get_message(self, msg_id: str) -> Optional[dict]:
         return await asyncio.to_thread(self._get_message_sync, msg_id)
+
+    async def get_streaming_msg(self, conv_id: str) -> Optional[str]:
+        return await asyncio.to_thread(self._get_streaming_msg_sync, conv_id)
 
     async def get_chunks_after(
         self, msg_id: str, after_seq: int

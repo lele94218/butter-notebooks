@@ -1,12 +1,12 @@
 import { useState, useEffect, useCallback } from 'react'
-import { TOKEN_KEY, API_BASE, DEFAULT_MODEL } from './lib/constants'
-import { getToken, headers, fetchConversations, apiDeleteConv } from './lib/api'
+import { TOKEN_KEY, DEFAULT_MODEL } from './lib/constants'
+import { getToken, fetchConversations, apiDeleteConv } from './lib/api'
 import { ThemeContext, applyThemeColor } from './lib/theme'
 import LoginScreen from './components/LoginScreen'
 import ChatPanel from './components/ChatPanel'
 import NotesPanel from './components/NotesPanel'
 import CodePanel from './components/CodePanel'
-import FileTree, { buildTree } from './components/FileTree'
+import NotebookPanel from './components/NotebookPanel'
 import './App.css'
 
 export default function App() {
@@ -37,29 +37,18 @@ export default function App() {
     return () => { vv.removeEventListener('resize', update); vv.removeEventListener('scroll', update) }
   }, [])
 
-  const [notes, setNotes] = useState([])
-  const [selectedNote, setSelectedNote] = useState(() => localStorage.getItem('butter_last_note') || null)
-  const [openDirs, setOpenDirs] = useState({})
   const [convId, setConvId] = useState(null)
   const [model, setModel] = useState(DEFAULT_MODEL)
   const [tab, setTab] = useState(() => localStorage.getItem('butter_last_tab') || 'chat')
-  const [sidebarTab, setSidebarTab] = useState('chats')
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
 
   const [conversations, setConversations] = useState([])
   const [activeConvId, setActiveConvId] = useState(null)
   const [activeMessages, setActiveMessages] = useState([])
-
-  const refreshNotes = useCallback(() => {
-    fetch(`${API_BASE}/v1/notes`, { headers: headers() })
-      .then(r => r.json())
-      .then(d => setNotes(d.files || []))
-      .catch(() => {})
-  }, [])
+  const [activeSessionId, setActiveSessionId] = useState(null)
 
   useEffect(() => {
-    refreshNotes()
     fetchConversations().then(setConversations)
   }, [])
 
@@ -67,6 +56,7 @@ export default function App() {
     setConvId(null)
     setActiveConvId(null)
     setActiveMessages([])
+    setActiveSessionId(null)
     setModel(DEFAULT_MODEL)
     setTab('chat')
   }
@@ -75,6 +65,7 @@ export default function App() {
     setConvId(conv.id)
     setActiveConvId(conv.id)
     setActiveMessages(conv.messages)
+    setActiveSessionId(conv.sessionId || null)
     setModel(conv.model || DEFAULT_MODEL)
     setTab('chat')
   }
@@ -127,50 +118,27 @@ export default function App() {
           <span>butter notebooks</span>
           <button className="sidebar-collapse-btn" onClick={() => setSidebarCollapsed(c => !c)} title={sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}>{sidebarCollapsed ? '»' : '«'}</button>
           <button className="sidebar-close-btn" onClick={() => setSidebarOpen(false)}>{'✕'}</button>
-          <div className="sidebar-tabs">
-            <button
-              className={`sidebar-tab ${sidebarTab === 'chats' ? 'active' : ''}`}
-              onClick={() => setSidebarTab('chats')}
-            >Chats</button>
-            <button
-              className={`sidebar-tab ${sidebarTab === 'notes' ? 'active' : ''}`}
-              onClick={() => setSidebarTab('notes')}
-            >Notes</button>
-            {sidebarTab === 'notes' && (
-              <button className="refresh-notes-btn" onClick={refreshNotes} title="Refresh notes">{'↺'}</button>
-            )}
-          </div>
         </div>
 
         <div className="notes-list">
-          {sidebarTab === 'chats' ? (
-            conversations.length === 0 ? (
-              <div className="sidebar-empty">No saved chats yet</div>
-            ) : (
-              conversations.map(conv => (
-                <div
-                  key={conv.id}
-                  className={`note-item conv-item ${activeConvId === conv.id ? 'active' : ''}`}
-                  onClick={() => { loadConversation(conv); setSidebarOpen(false) }}
-                  title={conv.title}
-                >
-                  <span className="conv-title">{conv.title}</span>
-                  <button
-                    className="conv-delete"
-                    onClick={(e) => deleteConversation(e, conv.id)}
-                    title="Delete"
-                  >{'×'}</button>
-                </div>
-              ))
-            )
+          {conversations.length === 0 ? (
+            <div className="sidebar-empty">No saved chats yet</div>
           ) : (
-            <FileTree
-              tree={buildTree(notes)}
-              selectedNote={selectedNote}
-              onSelect={f => { setSelectedNote(f); localStorage.setItem('butter_last_note', f); setTab('notes'); localStorage.setItem('butter_last_tab', 'notes'); setSidebarOpen(false) }}
-              openDirs={openDirs}
-              toggleDir={key => setOpenDirs(prev => ({ ...prev, [key]: prev[key] === false ? true : false }))}
-            />
+            conversations.map(conv => (
+              <div
+                key={conv.id}
+                className={`note-item conv-item ${activeConvId === conv.id ? 'active' : ''}`}
+                onClick={() => { loadConversation(conv); setSidebarOpen(false) }}
+                title={conv.title}
+              >
+                <span className="conv-title">{conv.title}</span>
+                <button
+                  className="conv-delete"
+                  onClick={(e) => deleteConversation(e, conv.id)}
+                  title="Delete"
+                >{'×'}</button>
+              </div>
+            ))
           )}
         </div>
 
@@ -189,19 +157,23 @@ export default function App() {
           <div className={`tab ${tab === 'chat' ? 'active' : ''}`} onClick={() => { setTab('chat'); localStorage.setItem('butter_last_tab', 'chat') }}>Chat</div>
           <div className={`tab ${tab === 'notes' ? 'active' : ''}`} onClick={() => { setTab('notes'); localStorage.setItem('butter_last_tab', 'notes') }}>Notes</div>
           <div className={`tab ${tab === 'code' ? 'active' : ''}`} onClick={() => { setTab('code'); localStorage.setItem('butter_last_tab', 'code') }}>Code</div>
+          <div className={`tab ${tab === 'notebook' ? 'active' : ''}`} onClick={() => { setTab('notebook'); localStorage.setItem('butter_last_tab', 'notebook') }}>Notebook</div>
         </div>
 
         {tab === 'chat'
           ? <ChatPanel
               key={activeConvId || 'new'}
               convId={convId}
+              initialSessionId={activeSessionId}
               initialMessages={activeMessages}
               onSaveConversation={handleSaveConversation}
               model={model}
               onModelChange={setModel}
             />
           : tab === 'notes'
-          ? <NotesPanel selectedNote={selectedNote} />
+          ? <NotesPanel />
+          : tab === 'notebook'
+          ? <NotebookPanel />
           : <CodePanel />
         }
       </div>

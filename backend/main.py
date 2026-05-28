@@ -216,6 +216,7 @@ async def run_agent_stream(
             stderr=asyncio.subprocess.PIPE,
             cwd=NOTES_ROOT,
             env=env,
+            limit=10 * 1024 * 1024,  # 10 MB — Claude tool results can be large
         )
     except Exception as e:
         yield f"data: {json.dumps({'type': 'error', 'text': str(e)})}\n\n"
@@ -238,6 +239,7 @@ async def run_agent_stream(
 
     new_session_id = session_id
     buf = b""
+    has_sent_text = False
 
     try:
         # stream-json: stdout emits one JSON object per line
@@ -272,7 +274,10 @@ async def run_agent_stream(
                     if block.get("type") == "text":
                         text = block.get("text", "")
                         if text:
+                            if has_sent_text and not text.startswith("\n"):
+                                text = "\n\n" + text
                             has_text = True
+                            has_sent_text = True
                             yield f"data: {json.dumps({'type': 'delta', 'text': text}, ensure_ascii=False)}\n\n"
                     elif block.get("type") == "thinking":
                         thinking = block.get("thinking", "")
@@ -643,6 +648,18 @@ async def resume_chat(
     return StreamingResponse(stream(), media_type="text/event-stream")
 
 
+@app.get("/v1/chat/pending/{conv_id}")
+@limiter.limit("60/minute")
+async def pending_message(
+    request: Request,
+    conv_id: str,
+    authorization: Optional[str] = Header(None),
+):
+    verify_token(authorization)
+    msg_id = await chat_store.get_streaming_msg(conv_id)
+    return {"msg_id": msg_id}
+
+
 @app.post("/v1/chat/voice")
 async def chat_voice(
     file: UploadFile = File(...),
@@ -960,6 +977,16 @@ async def reset_kernel(request: Request, session_id: str = "default", authorizat
     verify_token(authorization)
     await kernel_manager.reset(session_id)
     return {"ok": True}
+
+
+@app.get("/v1/jupyter-token")
+async def jupyter_token(authorization: Optional[str] = Header(None)):
+    verify_token(authorization)
+    token = os.environ.get("JUPYTER_TOKEN", "")
+    base_url = os.environ.get("JUPYTER_BASE_URL", "/jupyter/")
+    if not token:
+        raise HTTPException(status_code=503, detail="Jupyter not configured")
+    return {"token": token, "base_url": base_url}
 
 
 if __name__ == "__main__":
