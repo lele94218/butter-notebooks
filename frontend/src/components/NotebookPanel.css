@@ -1,0 +1,73 @@
+.notebook-panel {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  position: relative;
+}
+
+.notebook-iframe {
+  flex: 1;
+  width: 100%;
+  border: none;
+}
+
+.notebook-iframe--hidden {
+  position: absolute;
+  width: 0;
+  height: 0;
+  opacity: 0;
+}
+
+.notebook-progress-wrap {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+}
+
+.notebook-progress-text {
+  color: var(--fg-dim);
+  font-size: 13px;
+}
+
+.notebook-progress-track {
+  width: 200px;
+  height: 3px;
+  background: var(--border);
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.notebook-progress-bar {
+  height: 100%;
+  width: 40%;
+  background: var(--accent);
+  border-radius: 2px;
+  animation: notebook-progress 1.2s ease-in-out infinite;
+}
+
+@keyframes notebook-progress {
+  0%   { transform: translateX(-100%); }
+  100% { transform: translateX(350%); }
+}
+
+.notebook-loading,
+.notebook-error {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  color: var(--fg-dim);
+  font-size: 14px;
+}
+
+.notebook-error code {
+  font-size: 12px;
+  color: var(--red, #e55);
+  max-width: 400px;
+  word-break: break-all;
+}
