@@ -157,7 +157,7 @@ export default function App() {
           <div className={`tab ${tab === 'chat' ? 'active' : ''}`} onClick={() => { setTab('chat'); localStorage.setItem('butter_last_tab', 'chat') }}>Chat</div>
           <div className={`tab ${tab === 'notes' ? 'active' : ''}`} onClick={() => { setTab('notes'); localStorage.setItem('butter_last_tab', 'notes') }}>Notes</div>
           <div className={`tab ${tab === 'code' ? 'active' : ''}`} onClick={() => { setTab('code'); localStorage.setItem('butter_last_tab', 'code') }}>Code</div>
-          <div className={`tab ${tab === 'notebook' ? 'active' : ''}`} onClick={() => { setTab('notebook'); localStorage.setItem('butter_last_tab', 'notebook') }}>Notebook</div>
+          <div className={`tab ${tab === 'notebook' ? 'active' : ''}`} onClick={() => { setTab('notebook'); localStorage.setItem('butter_last_tab', 'notebook') }}>Jupyter</div>
         </div>
 
         {tab === 'chat'
