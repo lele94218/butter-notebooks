@@ -114,8 +114,16 @@ app.add_middleware(
 
 CLAUDE_BIN = os.environ.get("CLAUDE_BIN", "claude")
 CLAUDE_ALLOWED_TOOLS = "Read,Write,Edit,Glob,Grep,Bash"
-CLAUDE_MODELS = ("claude-sonnet-4-6", "claude-opus-4-6", "claude-opus-4-7")
-CLAUDE_DEFAULT_MODEL = "claude-sonnet-4-6"
+CLAUDE_MODELS = (
+    "claude-fable-5",
+    "claude-opus-4-8",
+    "claude-opus-4-7",
+    "claude-opus-4-6",
+    "claude-sonnet-5",
+    "claude-sonnet-4-6",
+    "claude-haiku-4-5-20251001",
+)
+CLAUDE_DEFAULT_MODEL = "claude-opus-4-8"
 
 
 def _normalize_model(model: Optional[str]) -> Optional[str]:

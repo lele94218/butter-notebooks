@@ -128,9 +128,10 @@ JUPYTER_BASE_URL=/jupyter/  # must match --NotebookApp.base_url=
 
 - Must use `--loop asyncio` (uvloop hangs under launchd)
 - Homebrew `Python.app` needs **Full Disk Access** (FDA) for iCloud Drive:
-  `/opt/homebrew/Cellar/python@3.13/3.13.12_1/Frameworks/Python.framework/Versions/3.13/Resources/Python.app`
-  (Python version upgrade → Cellar path changes → re-grant FDA)
-- Backend venv: Homebrew Python 3.13 (`backend/.venv`)
+  `/opt/homebrew/Cellar/python@3.14/3.14.5/Frameworks/Python.framework/Versions/3.14/Resources/Python.app`
+  (Python version upgrade → Cellar path changes → re-grant FDA, **and** the old
+  `backend/.venv` breaks — recreate it: `rm -rf .venv && python3 -m venv .venv && .venv/bin/pip install -r requirements.txt`)
+- Backend venv: Homebrew Python 3.14 (`backend/.venv`)
 - Code sandbox venv: ComfyUI (`SANDBOX_PYTHON`, has torch/numpy/matplotlib)
 - Notes file scan uses `subprocess find` (not `rglob`) to avoid blocking asyncio under launchd TCC
 - Jupyter runs from ComfyUI venv (`/Users/you/works/ComfyUI/venv/bin/jupyter-notebook`), port 8888, `--ip=0.0.0.0`. Must listen on all interfaces for Tailscale proxy to reach it. nginx strips `X-Frame-Options` and `Content-Security-Policy` headers to allow iframe embedding.
