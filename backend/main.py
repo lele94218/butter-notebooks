@@ -177,13 +177,44 @@ def _build_user_message_payload(
     }
 
 
-async def run_agent_stream(
+TOOL_RESULT_MAX = 4000
+
+
+def _normalize_tool_result(content) -> str:
+    """Flatten a tool_result `content` (string | list of blocks) to text.
+
+    Truncates long output so the SSE payload and stored chunk stay bounded.
+    """
+    if content is None:
+        text = ""
+    elif isinstance(content, str):
+        text = content
+    elif isinstance(content, list):
+        parts = []
+        for b in content:
+            if isinstance(b, dict):
+                if b.get("type") == "text":
+                    parts.append(b.get("text", ""))
+                elif b.get("type") == "image":
+                    parts.append("[image]")
+            elif isinstance(b, str):
+                parts.append(b)
+        text = "".join(parts)
+    else:
+        text = str(content)
+    text = text.strip()
+    if len(text) > TOOL_RESULT_MAX:
+        text = text[:TOOL_RESULT_MAX] + f"\n… (+{len(text) - TOOL_RESULT_MAX} more chars)"
+    return text
+
+
+async def _cli_attempt(
     prompt: str,
     session_id: Optional[str] = None,
     model: Optional[str] = None,
     images: Optional[list[dict]] = None,
 ):
-    """Run `claude -p --input-format stream-json --output-format stream-json`.
+    """One `claude -p --input-format stream-json --output-format stream-json` run.
 
     The user message (text + optional image blocks) is written to stdin as a
     single JSON line; stdin is then closed. Output streaming is unchanged.
@@ -291,25 +322,47 @@ async def run_agent_stream(
                         thinking = block.get("thinking", "")
                         if thinking:
                             yield f"data: {json.dumps({'type': 'thinking', 'text': thinking}, ensure_ascii=False)}\n\n"
+                    elif block.get("type") == "tool_use":
+                        tu = {
+                            "type": "tool_use",
+                            "id": block.get("id"),
+                            "name": block.get("name"),
+                            "input": block.get("input", {}),
+                        }
+                        yield f"data: {json.dumps(tu, ensure_ascii=False)}\n\n"
                 if not has_text:
                     logger.info(f"[assistant] no text, blocks={block_types}")
+
+            elif event_type == "user":
+                # user turn carries tool_result blocks (tool output)
+                msg = obj.get("message", {})
+                for block in msg.get("content", []):
+                    if block.get("type") == "tool_result":
+                        tr = {
+                            "type": "tool_result",
+                            "tool_use_id": block.get("tool_use_id"),
+                            "text": _normalize_tool_result(block.get("content")),
+                            "is_error": bool(block.get("is_error")),
+                        }
+                        yield f"data: {json.dumps(tr, ensure_ascii=False)}\n\n"
 
             elif event_type == "result":
                 sid = obj.get("session_id")
                 if sid:
                     new_session_id = sid
                 is_error = obj.get("is_error", False)
+                subtype = obj.get("subtype")
                 stop_reason = obj.get("stop_reason", "unknown")
                 denials = obj.get("permission_denials") or []
                 cost = obj.get("total_cost_usd")
                 logger.info(
-                    f"[result] is_error={is_error} stop_reason={stop_reason} "
+                    f"[result] is_error={is_error} subtype={subtype} stop_reason={stop_reason} "
                     f"permission_denials={len(denials)} cost_usd={cost}"
                 )
                 if denials:
                     logger.warning(f"[result] denied tools: {[d.get('toolName') for d in denials]}")
                 if is_error:
-                    err_text = obj.get("result", "unknown error")
+                    err_text = obj.get("result") or subtype or "unknown error"
                     logger.error(f"[result] error text: {err_text}")
                     yield f"data: {json.dumps({'type': 'error', 'text': err_text})}\n\n"
                     return
@@ -323,6 +376,50 @@ async def run_agent_stream(
     except Exception:
         logger.error(f"Agent error: {traceback.format_exc()}")
         yield f"data: {json.dumps({'type': 'error', 'text': 'Agent failed'})}\n\n"
+
+
+async def run_agent_stream(
+    prompt: str,
+    session_id: Optional[str] = None,
+    model: Optional[str] = None,
+    images: Optional[list[dict]] = None,
+):
+    """Stream a turn as SSE, self-healing stale Claude CLI sessions.
+
+    If resuming `session_id` fails or yields an empty turn (no content) — which
+    happens when the CLI session has expired ("No conversation found") — retry
+    once with a fresh session so the question still gets answered. The caller
+    persists the new session_id, so the conversation continues from there.
+    """
+    attempt_session = session_id
+    for attempt_no in (1, 2):
+        produced = False
+        retry = False
+        async for sse in _cli_attempt(prompt, attempt_session, model, images):
+            ev = _parse_sse_line(sse) or {}
+            et = ev.get("type")
+            if et in ("delta", "thinking", "tool_use", "tool_result"):
+                produced = True
+                yield sse
+            elif et == "session":
+                yield sse
+            elif et in ("done", "error"):
+                # Empty/failed resume: retry once with a fresh session.
+                if attempt_session and not produced and attempt_no == 1:
+                    retry = True
+                    break
+                yield sse
+                return
+            else:
+                yield sse
+        if retry:
+            logger.warning(
+                f"resume of session {attempt_session} produced no output "
+                f"(likely expired); retrying with a fresh session"
+            )
+            attempt_session = None
+            continue
+        return
 
 
 # --- Persistent background agent runner ---
@@ -343,12 +440,14 @@ def _parse_sse_line(sse: str) -> Optional[dict]:
 def _build_assistant_msg_from_chunks(chunks: list[tuple[int, str, str]]) -> dict:
     """Reconstruct the front-end assistant message shape from stored chunks.
 
-    Front-end schema: {role: 'assistant', text, thinking?, streaming: false}.
-    Concatenates `delta` text and `thinking` payloads; tool_use / system /
-    result events are skipped because the UI never renders them.
+    Front-end schema: {role: 'assistant', text, thinking?, tools?, streaming: false}.
+    Concatenates `delta` text and `thinking` payloads, and rebuilds the ordered
+    `tools` list from tool_use / tool_result events (matched by id).
     """
     text_parts: list[str] = []
     thinking_parts: list[str] = []
+    tools: list[dict] = []
+    tool_index: dict[str, int] = {}
     for _seq, _type, payload in chunks:
         try:
             data = json.loads(payload)
@@ -363,10 +462,71 @@ def _build_assistant_msg_from_chunks(chunks: list[tuple[int, str, str]]) -> dict
             t = data.get("text")
             if t:
                 thinking_parts.append(t)
+        elif et == "tool_use":
+            tid = data.get("id")
+            entry = {"id": tid, "name": data.get("name"), "input": data.get("input", {})}
+            if tid is not None:
+                tool_index[tid] = len(tools)
+            tools.append(entry)
+        elif et == "tool_result":
+            tid = data.get("tool_use_id")
+            idx = tool_index.get(tid)
+            if idx is not None:
+                tools[idx]["result"] = data.get("text", "")
+                tools[idx]["is_error"] = bool(data.get("is_error"))
     msg: dict = {"role": "assistant", "text": "".join(text_parts), "streaming": False}
     if thinking_parts:
         msg["thinking"] = "".join(thinking_parts)
+    if tools:
+        msg["tools"] = tools
     return msg
+
+
+async def _write_provisional_conversation(
+    save_conv_id: str,
+    prompt: str,
+    model: Optional[str],
+    images: Optional[list[dict]] = None,
+):
+    """Persist the conversation at turn START: prior messages + the new user
+    message + a streaming placeholder. This makes an in-flight turn visible in
+    the sidebar and reopenable after a refresh (fixes: new topic mid-answer not
+    in DB; existing topic's new question lost on refresh).
+
+    The trailing placeholder is replaced with the real answer by
+    _persist_conversation_after_turn when the turn completes.
+    """
+    existing = await chat_store.get_conversation(save_conv_id)
+    prior_messages = (existing.get("messages") if existing else None) or []
+
+    user_msg: dict = {"role": "user", "text": prompt}
+    if images:
+        user_msg["images"] = images
+    placeholder: dict = {"role": "assistant", "text": "", "streaming": True}
+    new_messages = list(prior_messages) + [user_msg, placeholder]
+
+    if existing and existing.get("title"):
+        title = existing["title"]
+    else:
+        title = (prompt[:48] + ("…" if len(prompt) > 48 else "")) if prompt else "New conversation"
+
+    import time as _time
+    updated_at = int(_time.time() * 1000)
+
+    effective_model = _normalize_model(model)
+    if not effective_model and existing:
+        effective_model = existing.get("model")
+
+    session_id = existing.get("sessionId") if existing else None
+
+    await chat_store.upsert_conversation(
+        conv_id=save_conv_id,
+        title=title,
+        messages=new_messages,
+        updated_at=updated_at,
+        session_id=session_id,
+        model=effective_model,
+    )
 
 
 async def _persist_conversation_after_turn(
@@ -390,10 +550,20 @@ async def _persist_conversation_after_turn(
     existing = await chat_store.get_conversation(save_conv_id)
     prior_messages = (existing.get("messages") if existing else None) or []
 
-    user_msg: dict = {"role": "user", "text": prompt}
-    if images:
-        user_msg["images"] = images
-    new_messages = list(prior_messages) + [user_msg, assistant_msg]
+    if (
+        len(prior_messages) >= 2
+        and isinstance(prior_messages[-1], dict)
+        and prior_messages[-1].get("role") == "assistant"
+        and prior_messages[-1].get("streaming")
+    ):
+        # Provisional placeholder written at turn start — replace it in place
+        # (the user message just before it is already persisted).
+        new_messages = list(prior_messages[:-1]) + [assistant_msg]
+    else:
+        user_msg: dict = {"role": "user", "text": prompt}
+        if images:
+            user_msg["images"] = images
+        new_messages = list(prior_messages) + [user_msg, assistant_msg]
 
     if existing and existing.get("title"):
         title = existing["title"]
@@ -597,6 +767,14 @@ async def chat(request: Request, req: ChatRequest, authorization: Optional[str] 
     # Look up session_id from DB — frontend no longer tracks it
     existing_conv = await chat_store.get_conversation(conv_id)
     session_id = existing_conv.get("sessionId") if existing_conv else None
+
+    # Persist a provisional conversation (user message + streaming placeholder)
+    # so a refresh mid-answer can find and reopen this turn.
+    save_conv_id = req.conv_id or msg_id
+    try:
+        await _write_provisional_conversation(save_conv_id, req.message, req.model, images)
+    except Exception:
+        logger.warning(f"provisional conv write failed: {traceback.format_exc()}")
 
     task = asyncio.create_task(
         _run_agent_persistent(

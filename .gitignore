@@ -16,3 +16,8 @@ venv/
 # misc
 .DS_Store
 *.log
+
+# runtime data / model artifacts (not source)
+backend/butter.db
+*.pt
+data/

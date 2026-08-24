@@ -3,6 +3,7 @@ import { API_BASE, MODELS, DEFAULT_MODEL } from '../lib/constants'
 import { headers } from '../lib/api'
 import MdMessage from './MdMessage'
 import AuthImage from './AuthImage'
+import ToolCard from './ToolCard'
 import './ChatPanel.css'
 
 const INITIAL_VISIBLE_MESSAGES = 20
@@ -134,6 +135,29 @@ export default function ChatPanel({ convId, initialSessionId, initialMessages, o
               }
               return msgs
             })
+          } else if (data.type === 'tool_use') {
+            setMessages(prev => {
+              const msgs = [...prev]
+              const last = { ...msgs[msgs.length - 1] }
+              last.tools = [
+                ...(last.tools || []),
+                { id: data.id, name: data.name, input: data.input, running: true },
+              ]
+              msgs[msgs.length - 1] = last
+              return msgs
+            })
+          } else if (data.type === 'tool_result') {
+            setMessages(prev => {
+              const msgs = [...prev]
+              const last = { ...msgs[msgs.length - 1] }
+              last.tools = (last.tools || []).map(t =>
+                t.id === data.tool_use_id
+                  ? { ...t, result: data.text, is_error: data.is_error, running: false }
+                  : t
+              )
+              msgs[msgs.length - 1] = last
+              return msgs
+            })
           } else if (data.type === 'delta') {
             setMessages(prev => {
               const msgs = [...prev]
@@ -166,7 +190,20 @@ export default function ChatPanel({ convId, initialSessionId, initialMessages, o
       try {
         const r = await fetch(`${API_BASE}/v1/chat/pending/${convId}`, { headers: headers() })
         const d = await r.json()
-        if (cancelled || !d.msg_id) return
+        if (cancelled) return
+        if (!d.msg_id) {
+          // No live stream. Clear any stale streaming placeholder (e.g. server
+          // restarted mid-turn) so it doesn't spin forever.
+          setMessages(prev => {
+            if (prev.length && prev[prev.length - 1].streaming) {
+              const msgs = [...prev]
+              msgs[msgs.length - 1] = { ...msgs[msgs.length - 1], streaming: false }
+              return msgs
+            }
+            return prev
+          })
+          return
+        }
 
         setMessages(prev => {
           if (prev.length > 0 && prev[prev.length - 1].streaming) return prev
@@ -343,9 +380,14 @@ export default function ChatPanel({ convId, initialSessionId, initialMessages, o
               {msg.role === 'assistant' ? (
                 <div className="msg-assistant">
                   {msg.thinking ? <div className="msg-thinking">{msg.thinking}</div> : null}
-                  {msg.text === '' && msg.streaming
+                  {msg.tools && msg.tools.length > 0 && (
+                    <div className="msg-tools">
+                      {msg.tools.map((t, ti) => <ToolCard key={t.id || ti} tool={t} />)}
+                    </div>
+                  )}
+                  {msg.text === '' && msg.streaming && !(msg.tools && msg.tools.length)
                     ? <div className="thinking-dots"><span/><span/><span/></div>
-                    : msg.text === '' && !msg.streaming && !msg.thinking
+                    : msg.text === '' && !msg.streaming && !msg.thinking && !(msg.tools && msg.tools.length)
                       ? <div className="msg-empty">(no reply)</div>
                       : msg.text
                         ? <MdMessage text={msg.text} streaming={msg.streaming} />
