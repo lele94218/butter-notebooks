@@ -241,10 +241,10 @@ async def _cli_attempt(
     try:
         user_msg_payload = _build_user_message_payload(prompt, images)
     except HTTPException as e:
-        yield f"data: {json.dumps({'type': 'error', 'text': e.detail})}\n\n"
+        yield f"data: {json.dumps({'type': 'error', 'code': 'input', 'text': e.detail})}\n\n"
         return
     except Exception as e:
-        yield f"data: {json.dumps({'type': 'error', 'text': f'image load failed: {e}'})}\n\n"
+        yield f"data: {json.dumps({'type': 'error', 'code': 'image', 'text': f'image load failed: {e}'})}\n\n"
         return
 
     # The `claude` binary can vanish for a second or two while it auto-updates
@@ -271,10 +271,10 @@ async def _cli_attempt(
                 )
                 await asyncio.sleep(1.5)
                 continue
-            yield f"data: {json.dumps({'type': 'error', 'text': f'claude CLI unavailable: {e}'})}\n\n"
+            yield f"data: {json.dumps({'type': 'error', 'code': 'cli_unavailable', 'text': f'claude CLI unavailable: {e}'})}\n\n"
             return
         except Exception as e:
-            yield f"data: {json.dumps({'type': 'error', 'text': str(e)})}\n\n"
+            yield f"data: {json.dumps({'type': 'error', 'code': 'spawn', 'text': str(e)})}\n\n"
             return
 
     # Write the single user message line, then close stdin so claude stops
@@ -285,7 +285,7 @@ async def _cli_attempt(
         proc.stdin.close()
     except Exception as e:
         logger.error(f"failed to write stream-json input: {e}")
-        yield f"data: {json.dumps({'type': 'error', 'text': f'stdin write failed: {e}'})}\n\n"
+        yield f"data: {json.dumps({'type': 'error', 'code': 'stdin', 'text': f'stdin write failed: {e}'})}\n\n"
         try:
             proc.kill()
         except Exception:
@@ -380,7 +380,7 @@ async def _cli_attempt(
                 if is_error:
                     err_text = obj.get("result") or subtype or "unknown error"
                     logger.error(f"[result] error text: {err_text}")
-                    yield f"data: {json.dumps({'type': 'error', 'text': err_text})}\n\n"
+                    yield f"data: {json.dumps({'type': 'error', 'code': subtype or 'agent_error', 'text': err_text})}\n\n"
                     return
                 yield f"data: {json.dumps({'type': 'done', 'session_id': new_session_id})}\n\n"
                 return
@@ -391,7 +391,7 @@ async def _cli_attempt(
 
     except Exception:
         logger.error(f"Agent error: {traceback.format_exc()}")
-        yield f"data: {json.dumps({'type': 'error', 'text': 'Agent failed'})}\n\n"
+        yield f"data: {json.dumps({'type': 'error', 'code': 'agent', 'text': 'Agent failed'})}\n\n"
 
 
 async def run_agent_stream(
@@ -464,6 +464,7 @@ def _build_assistant_msg_from_chunks(chunks: list[tuple[int, str, str]]) -> dict
     thinking_parts: list[str] = []
     tools: list[dict] = []
     tool_index: dict[str, int] = {}
+    error: Optional[dict] = None
     for _seq, _type, payload in chunks:
         try:
             data = json.loads(payload)
@@ -490,11 +491,15 @@ def _build_assistant_msg_from_chunks(chunks: list[tuple[int, str, str]]) -> dict
             if idx is not None:
                 tools[idx]["result"] = data.get("text", "")
                 tools[idx]["is_error"] = bool(data.get("is_error"))
+        elif et == "error":
+            error = {"code": data.get("code") or "error", "text": data.get("text") or "unknown error"}
     msg: dict = {"role": "assistant", "text": "".join(text_parts), "streaming": False}
     if thinking_parts:
         msg["thinking"] = "".join(thinking_parts)
     if tools:
         msg["tools"] = tools
+    if error:
+        msg["error"] = error
     return msg
 
 
@@ -670,12 +675,14 @@ async def _run_agent_persistent(
             session_id=new_session_id,
             error_text=error_text,
         )
-        # Backend-authoritative conversation persistence: only on clean turns,
-        # so a half-dead stream never corrupts the saved transcript. Wrapped
-        # so persistence bugs can't break SSE delivery (we're past the yield
-        # path here, but the task should still finish without a hard crash).
-        if status == "done":
-            if session_id != new_session_id:
+        # Backend-authoritative conversation persistence. On a clean turn this
+        # writes the real answer; on an error turn it writes the assistant
+        # message carrying the error (code + text) so the failure survives a
+        # hard refresh instead of collapsing back to an empty bubble. Only
+        # "cancelled" is skipped (leaves the provisional placeholder as-is).
+        # Wrapped so persistence bugs can't break SSE delivery.
+        if status in ("done", "error"):
+            if status == "done" and session_id != new_session_id:
                 logger.warning(
                     f"session_id changed during turn: "
                     f"conv_id={conv_id} original={session_id} new={new_session_id}"

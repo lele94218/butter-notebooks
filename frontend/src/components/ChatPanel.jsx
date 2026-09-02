@@ -9,6 +9,21 @@ import './ChatPanel.css'
 const INITIAL_VISIBLE_MESSAGES = 20
 const MESSAGES_PAGE_SIZE = 20
 
+// Map backend error `code` values to a short human label shown on the error card.
+const ERROR_LABELS = {
+  cli_unavailable: 'CLI 更新中',
+  spawn: '启动失败',
+  stdin: '输入写入失败',
+  image: '图片加载失败',
+  input: '输入无效',
+  agent: 'Agent 失败',
+  agent_error: 'Agent 错误',
+  error_during_execution: '执行中断',
+}
+function errorLabel(code) {
+  return ERROR_LABELS[code] || code || '错误'
+}
+
 export default function ChatPanel({ convId, initialSessionId, initialMessages, onSaveConversation, model, onModelChange }) {
   const [messages, setMessages] = useState(initialMessages || [])
   const messagesRef = useRef(messages)
@@ -177,6 +192,14 @@ export default function ChatPanel({ convId, initialSessionId, initialMessages, o
             })
           } else if (data.type === 'error') {
             setStatus(`error: ${data.text}`)
+            setMessages(prev => {
+              const msgs = [...prev]
+              const last = { ...msgs[msgs.length - 1] }
+              last.error = { code: data.code || 'error', text: data.text || 'unknown error' }
+              last.streaming = false
+              msgs[msgs.length - 1] = last
+              return msgs
+            })
           }
         } catch {}
       }
@@ -385,12 +408,24 @@ export default function ChatPanel({ convId, initialSessionId, initialMessages, o
                       {msg.tools.map((t, ti) => <ToolCard key={t.id || ti} tool={t} />)}
                     </div>
                   )}
-                  {msg.text === '' && msg.streaming && !(msg.tools && msg.tools.length)
-                    ? <div className="thinking-dots"><span/><span/><span/></div>
-                    : msg.text === '' && !msg.streaming && !msg.thinking && !(msg.tools && msg.tools.length)
-                      ? <div className="msg-empty">(no reply)</div>
-                      : msg.text
-                        ? <MdMessage text={msg.text} streaming={msg.streaming} />
+                  {msg.text
+                    ? <MdMessage text={msg.text} streaming={msg.streaming} />
+                    : null}
+                  {msg.error
+                    ? <div className="msg-error">
+                        <span className="msg-error-icon">⚠</span>
+                        <div className="msg-error-body">
+                          <div className="msg-error-title">
+                            出错了
+                            <span className="msg-error-code">{errorLabel(msg.error.code)}</span>
+                          </div>
+                          <div className="msg-error-text">{msg.error.text}</div>
+                        </div>
+                      </div>
+                    : msg.text === '' && msg.streaming && !(msg.tools && msg.tools.length)
+                      ? <div className="thinking-dots"><span/><span/><span/></div>
+                      : msg.text === '' && !msg.streaming && !msg.thinking && !(msg.tools && msg.tools.length)
+                        ? <div className="msg-empty">(no reply)</div>
                         : null
                   }
                 </div>
