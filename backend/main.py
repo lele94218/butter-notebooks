@@ -247,19 +247,35 @@ async def _cli_attempt(
         yield f"data: {json.dumps({'type': 'error', 'text': f'image load failed: {e}'})}\n\n"
         return
 
-    try:
-        proc = await asyncio.create_subprocess_exec(
-            *cmd,
-            stdin=asyncio.subprocess.PIPE,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-            cwd=NOTES_ROOT,
-            env=env,
-            limit=10 * 1024 * 1024,  # 10 MB — Claude tool results can be large
-        )
-    except Exception as e:
-        yield f"data: {json.dumps({'type': 'error', 'text': str(e)})}\n\n"
-        return
+    # The `claude` binary can vanish for a second or two while it auto-updates
+    # (npm recreates the symlink), so a message sent in that window would spawn
+    # a FileNotFoundError. Retry a few times with a short backoff instead of
+    # failing the turn.
+    proc = None
+    for spawn_try in range(4):
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                *cmd,
+                stdin=asyncio.subprocess.PIPE,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+                cwd=NOTES_ROOT,
+                env=env,
+                limit=10 * 1024 * 1024,  # 10 MB — Claude tool results can be large
+            )
+            break
+        except FileNotFoundError as e:
+            if spawn_try < 3:
+                logger.warning(
+                    f"claude CLI not found (likely mid-update), retry {spawn_try + 1}/3: {e}"
+                )
+                await asyncio.sleep(1.5)
+                continue
+            yield f"data: {json.dumps({'type': 'error', 'text': f'claude CLI unavailable: {e}'})}\n\n"
+            return
+        except Exception as e:
+            yield f"data: {json.dumps({'type': 'error', 'text': str(e)})}\n\n"
+            return
 
     # Write the single user message line, then close stdin so claude stops
     # waiting for more input and processes what it has.
