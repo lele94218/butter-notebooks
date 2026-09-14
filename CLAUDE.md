@@ -81,6 +81,23 @@ sent as conv_id in every request     looked up from DB, never sent by frontend
 - After each turn, `_persist_conversation_after_turn` saves the (possibly new) `session_id` from Claude CLI back to the DB.
 - **Important**: Deploying frontend changes that touch the chat flow requires restarting the backend too (`launchctl kickstart`), since the backend is not auto-reloaded.
 
+## Agents / Backends (Claude + Codex)
+
+The chat backend runs one of two CLIs, chosen by the request's `model`. The frontend splits selection into two dropdowns: **Agent** (Claude / Codex) + **Model**.
+
+- **Dispatch**: `run_agent_stream` picks `_codex_attempt` if `_is_codex_model(model)` else `_cli_attempt`. Both yield the same SSE event contract (`session` / `thinking` / `tool_use` / `tool_result` / `delta` / `done` / `error`), so the frontend renders both identically.
+- **Claude** (`_cli_attempt`): `claude -p ... --dangerously-skip-permissions`, stream-json. Models in `CLAUDE_MODELS`.
+- **Codex** (`_codex_attempt`): `codex exec --json --dangerously-bypass-approvals-and-sandbox` (skip-permission, mirrors claude). `CODEX_MODELS` maps ids → `{model, effort}`; only `gpt-6-astra` has full metadata here. Resume via `codex exec resume <thread_id>`. Codex JSONL events (`thread.started`, `item.completed{agent_message|reasoning|command_execution}`, `turn.completed`) are mapped to the SSE contract.
+- **session_id** is backend-specific and **not interchangeable** (claude `--resume` token vs codex `thread_id`). Switching backends mid-conversation is **forbidden by design**: the frontend disables the other agent once a chat has started; the backend returns **409** as a safety net.
+- **Self-heal**: an expired/foreign session (resume yields no output) retries once with a fresh session.
+- Both are skip-permission → can read/write/run freely on the Mac. `cwd=NOTES_ROOT`.
+
+### Chat resilience
+
+- **In-flight refresh**: the active conv id is stored in `localStorage['butter_active_conv']` at send time; on reload App restores it and ChatPanel's pending/resume effect reattaches the live stream (question + thinking indicator survive a refresh).
+- **Sidebar running dot**: `/v1/conversations` returns a per-conv `running` flag (any `status='streaming'` message); the sidebar shows a pulsing green dot, polled every 4s, so an in-flight run is visible from any chat.
+- **Errors**: backend error SSE events carry a `code`; the frontend renders an inline error card and persists it to the transcript so it survives a refresh.
+
 ## Deploy
 
 ```bash

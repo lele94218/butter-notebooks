@@ -17,7 +17,8 @@
   flex-shrink: 0;
 }
 
-.chat-topbar .model-select {
+.chat-topbar .model-select,
+.chat-topbar .agent-select {
   background: var(--bg2);
   color: var(--text);
   border: 1px solid var(--border);
@@ -26,10 +27,12 @@
   font-size: 12px;
   cursor: pointer;
 }
-.chat-topbar .model-select:disabled {
+.chat-topbar .model-select:disabled,
+.chat-topbar .agent-select:disabled {
   opacity: 0.6;
   cursor: not-allowed;
 }
+.chat-topbar .agent-select { font-weight: 600; }
 
 .chat-topbar .sid-pill {
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;

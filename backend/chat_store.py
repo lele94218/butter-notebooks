@@ -209,6 +209,16 @@ class ChatStore:
         finally:
             conn.close()
 
+    def _get_running_conv_ids_sync(self) -> set[str]:
+        conn = self._conn()
+        try:
+            rows = conn.execute(
+                "SELECT DISTINCT conv_id FROM messages WHERE status='streaming'"
+            ).fetchall()
+            return {r[0] for r in rows}
+        finally:
+            conn.close()
+
     def _get_streaming_msg_sync(self, conv_id: str) -> Optional[str]:
         conn = self._conn()
         try:
@@ -252,6 +262,9 @@ class ChatStore:
 
     async def get_streaming_msg(self, conv_id: str) -> Optional[str]:
         return await asyncio.to_thread(self._get_streaming_msg_sync, conv_id)
+
+    async def get_running_conv_ids(self) -> set[str]:
+        return await asyncio.to_thread(self._get_running_conv_ids_sync)
 
     async def get_chunks_after(
         self, msg_id: str, after_seq: int

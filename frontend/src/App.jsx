@@ -49,7 +49,33 @@ export default function App() {
   const [activeSessionId, setActiveSessionId] = useState(null)
 
   useEffect(() => {
-    fetchConversations().then(setConversations)
+    fetchConversations().then(list => {
+      setConversations(list)
+      // Restore the conversation that was open before a refresh, so an in-flight
+      // run (its question + thinking indicator + live stream) is picked back up
+      // by ChatPanel's pending/resume effect instead of landing on a blank chat.
+      const saved = localStorage.getItem('butter_active_conv')
+      if (!saved) return
+      const conv = list.find(c => c.id === saved)
+      if (conv) {
+        setConvId(conv.id)
+        setActiveConvId(conv.id)
+        setActiveMessages(conv.messages)
+        setActiveSessionId(conv.sessionId || null)
+        setModel(conv.model || DEFAULT_MODEL)
+      }
+    })
+  }, [])
+
+  // Keep the sidebar "running" dots live: poll periodically and update only the
+  // per-conversation running flag (never touch messages/order/titles).
+  useEffect(() => {
+    const poll = setInterval(async () => {
+      const list = await fetchConversations()
+      const runningIds = new Set(list.filter(c => c.running).map(c => c.id))
+      setConversations(prev => prev.map(c => ({ ...c, running: runningIds.has(c.id) })))
+    }, 4000)
+    return () => clearInterval(poll)
   }, [])
 
   const newChat = () => {
@@ -59,6 +85,7 @@ export default function App() {
     setActiveSessionId(null)
     setModel(DEFAULT_MODEL)
     setTab('chat')
+    localStorage.removeItem('butter_active_conv')
   }
 
   const loadConversation = (conv) => {
@@ -68,6 +95,7 @@ export default function App() {
     setActiveSessionId(conv.sessionId || null)
     setModel(conv.model || DEFAULT_MODEL)
     setTab('chat')
+    localStorage.setItem('butter_active_conv', conv.id)
   }
 
   const handleSaveConversation = useCallback((messages, firstUserMsg, stableConvId) => {
@@ -92,6 +120,7 @@ export default function App() {
     setConvId(id)
     setActiveConvId(id)
     setActiveMessages(messages)
+    localStorage.setItem('butter_active_conv', id)
   }, [model])
 
   const deleteConversation = (e, id) => {
@@ -129,8 +158,9 @@ export default function App() {
                 key={conv.id}
                 className={`note-item conv-item ${activeConvId === conv.id ? 'active' : ''}`}
                 onClick={() => { loadConversation(conv); setSidebarOpen(false) }}
-                title={conv.title}
+                title={conv.running ? `${conv.title} (running…)` : conv.title}
               >
+                {conv.running && <span className="conv-running-dot" title="Running…" />}
                 <span className="conv-title">{conv.title}</span>
                 <button
                   className="conv-delete"

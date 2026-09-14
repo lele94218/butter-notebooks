@@ -91,6 +91,20 @@
   gap: 4px;
   padding-right: 8px;
 }
+.conv-running-dot {
+  flex-shrink: 0;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #3c9a5f;
+  box-shadow: 0 0 0 0 rgba(60, 154, 95, 0.6);
+  animation: conv-running-pulse 1.4s ease-in-out infinite;
+}
+@keyframes conv-running-pulse {
+  0%   { box-shadow: 0 0 0 0 rgba(60, 154, 95, 0.55); opacity: 1; }
+  70%  { box-shadow: 0 0 0 5px rgba(60, 154, 95, 0);  opacity: 0.7; }
+  100% { box-shadow: 0 0 0 0 rgba(60, 154, 95, 0);    opacity: 1; }
+}
 .conv-title {
   flex: 1;
   overflow: hidden;

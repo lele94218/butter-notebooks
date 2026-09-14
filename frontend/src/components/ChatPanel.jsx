@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useLayoutEffect, useCallback } from 'react'
-import { API_BASE, MODELS, DEFAULT_MODEL } from '../lib/constants'
+import { API_BASE, DEFAULT_MODEL, AGENTS, modelBackend, agentModels, defaultModelForAgent } from '../lib/constants'
 import { headers } from '../lib/api'
 import MdMessage from './MdMessage'
 import AuthImage from './AuthImage'
@@ -302,6 +302,10 @@ export default function ChatPanel({ convId, initialSessionId, initialMessages, o
     if (textareaRef.current) textareaRef.current.style.height = 'auto'
 
     const effectiveConvId = convId || crypto.randomUUID()
+    // Persist the active conversation id NOW (not just on completion) so a
+    // refresh during a long-running turn restores this chat — its question,
+    // the waiting indicator, and the live stream — instead of a blank chat.
+    try { localStorage.setItem('butter_active_conv', effectiveConvId) } catch {}
 
     const userMsg = { role: 'user', text, ...(imagesForMsg.length ? { images: imagesForMsg } : {}) }
     const assistantMsg = { role: 'assistant', text: '', thinking: '', streaming: true }
@@ -369,13 +373,26 @@ export default function ChatPanel({ convId, initialSessionId, initialMessages, o
     <div className="chat-panel">
       <div className="chat-topbar">
         <select
+          className="agent-select"
+          value={modelBackend(model || DEFAULT_MODEL)}
+          onChange={e => onModelChange(defaultModelForAgent(e.target.value))}
+          disabled={loading || messages.length > 0}
+          title={messages.length > 0
+            ? 'Agent is locked for this chat — start a new chat to switch between Claude and Codex'
+            : 'Agent'}
+        >
+          {AGENTS.map(a => (
+            <option key={a.id} value={a.id}>{a.label}</option>
+          ))}
+        </select>
+        <select
           className="model-select"
           value={model || DEFAULT_MODEL}
           onChange={e => onModelChange(e.target.value)}
           disabled={loading}
-          title="Claude model"
+          title="Model"
         >
-          {MODELS.map(m => (
+          {agentModels(modelBackend(model || DEFAULT_MODEL)).map(m => (
             <option key={m.id} value={m.id}>{m.label}</option>
           ))}
         </select>

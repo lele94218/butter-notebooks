@@ -125,10 +125,24 @@ CLAUDE_MODELS = (
 )
 CLAUDE_DEFAULT_MODEL = "claude-opus-4-8"
 
+# --- Codex CLI backend (OpenAI `codex exec`) ---
+# Selected when the frontend picks one of these model IDs. Each maps to a codex
+# `-m` slug and reasoning effort. Runs in skip-permission mode (bypass approvals
+# + sandbox), mirroring claude's --dangerously-skip-permissions.
+CODEX_BIN = os.environ.get("CODEX_BIN", "codex")
+CODEX_MODELS: dict[str, dict] = {
+    "codex":      {"model": "gpt-6-astra", "effort": "medium"},
+    "codex-high": {"model": "gpt-6-astra", "effort": "high"},
+}
+
+
+def _is_codex_model(model: Optional[str]) -> bool:
+    return bool(model) and model in CODEX_MODELS
+
 
 def _normalize_model(model: Optional[str]) -> Optional[str]:
-    """Only pass through known model IDs; otherwise let claude CLI default."""
-    if model and model in CLAUDE_MODELS:
+    """Pass through known model IDs (claude or codex); else let the CLI default."""
+    if model and (model in CLAUDE_MODELS or model in CODEX_MODELS):
         return model
     return None
 CLAUDE_SYSTEM_PROMPT = (
@@ -394,6 +408,150 @@ async def _cli_attempt(
         yield f"data: {json.dumps({'type': 'error', 'code': 'agent', 'text': 'Agent failed'})}\n\n"
 
 
+async def _codex_attempt(
+    prompt: str,
+    session_id: Optional[str] = None,
+    model: Optional[str] = None,
+    images: Optional[list[dict]] = None,
+):
+    """One `codex exec --json` run, mapped to the same SSE event contract as
+    `_cli_attempt` (session / thinking / tool_use / tool_result / delta / done /
+    error). Resumes `session_id` (codex thread_id) when provided.
+
+    Codex emits JSONL: thread.started{thread_id}, turn.started, item.started /
+    item.completed{item:{type: agent_message|reasoning|command_execution,...}},
+    turn.completed{usage}, and error events.
+    """
+    # Codex reads image paths directly (-i FILE); no base64 inlining needed.
+    img_args: list[str] = []
+    for img in images or []:
+        p = Path(img.get("path", "")).resolve()
+        try:
+            p.relative_to(UPLOADS_ROOT_RESOLVED)
+        except ValueError:
+            yield f"data: {json.dumps({'type': 'error', 'code': 'input', 'text': 'Image path outside uploads dir'})}\n\n"
+            return
+        if p.is_file():
+            img_args += ["-i", str(p)]
+
+    # Skip-permission mode: bypass approvals + sandbox, like claude's
+    # --dangerously-skip-permissions. Codex can read/write/run freely.
+    BYPASS = "--dangerously-bypass-approvals-and-sandbox"
+    if session_id:
+        cmd = [CODEX_BIN, "exec", "resume", session_id, "--json", "--skip-git-repo-check", BYPASS]
+        cmd += img_args
+        cmd.append(prompt)
+    else:
+        cmd = [CODEX_BIN, "exec", "--json", "--skip-git-repo-check", BYPASS]
+        cfg = CODEX_MODELS.get(model or "", {})
+        if cfg.get("model"):
+            cmd += ["-m", cfg["model"]]
+        if cfg.get("effort"):
+            cmd += ["-c", f"model_reasoning_effort={cfg['effort']}"]
+        cmd += img_args
+        # Nudge output formatting to match the app's Markdown/KaTeX renderer.
+        cmd.append(CLAUDE_SYSTEM_PROMPT + "\n\n" + prompt)
+
+    env = {k: v for k, v in os.environ.items() if k != "CLAUDECODE"}
+
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            *cmd,
+            stdin=asyncio.subprocess.DEVNULL,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+            cwd=NOTES_ROOT,
+            env=env,
+            limit=10 * 1024 * 1024,
+        )
+    except FileNotFoundError as e:
+        yield f"data: {json.dumps({'type': 'error', 'code': 'cli_unavailable', 'text': f'codex CLI unavailable: {e}'})}\n\n"
+        return
+    except Exception as e:
+        yield f"data: {json.dumps({'type': 'error', 'code': 'spawn', 'text': str(e)})}\n\n"
+        return
+
+    new_session_id = session_id
+    has_sent_text = False
+
+    try:
+        async for raw in proc.stdout:
+            raw = raw.strip()
+            if not raw:
+                continue
+            try:
+                obj = json.loads(raw)
+            except Exception:
+                continue
+
+            et = obj.get("type")
+
+            if et == "thread.started":
+                sid = obj.get("thread_id")
+                if sid:
+                    new_session_id = sid
+                    yield f"data: {json.dumps({'type': 'session', 'session_id': sid})}\n\n"
+
+            elif et == "item.started":
+                item = obj.get("item", {})
+                if item.get("type") == "command_execution":
+                    tu = {
+                        "type": "tool_use",
+                        "id": item.get("id"),
+                        "name": "Shell",
+                        "input": {"command": item.get("command", "")},
+                    }
+                    yield f"data: {json.dumps(tu, ensure_ascii=False)}\n\n"
+
+            elif et == "item.completed":
+                item = obj.get("item", {})
+                itype = item.get("type")
+                if itype == "agent_message":
+                    text = item.get("text", "")
+                    if text:
+                        if has_sent_text and not text.startswith("\n"):
+                            text = "\n\n" + text
+                        has_sent_text = True
+                        yield f"data: {json.dumps({'type': 'delta', 'text': text}, ensure_ascii=False)}\n\n"
+                elif itype == "reasoning":
+                    text = item.get("text") or item.get("summary") or ""
+                    if text:
+                        yield f"data: {json.dumps({'type': 'thinking', 'text': text}, ensure_ascii=False)}\n\n"
+                elif itype == "command_execution":
+                    tr = {
+                        "type": "tool_result",
+                        "tool_use_id": item.get("id"),
+                        "text": _normalize_tool_result(item.get("aggregated_output", "")),
+                        "is_error": item.get("exit_code") not in (0, None),
+                    }
+                    yield f"data: {json.dumps(tr, ensure_ascii=False)}\n\n"
+
+            elif et in ("turn.completed", "thread.completed"):
+                yield f"data: {json.dumps({'type': 'done', 'session_id': new_session_id})}\n\n"
+                return
+
+            elif et in ("error", "turn.failed", "thread.error"):
+                msg = obj.get("message") or obj.get("error") or "codex error"
+                if isinstance(msg, dict):
+                    msg = msg.get("message") or str(msg)
+                logger.error(f"[codex] error: {msg}")
+                yield f"data: {json.dumps({'type': 'error', 'code': 'agent_error', 'text': msg})}\n\n"
+                return
+
+        # stream ended without an explicit terminal event
+        rc = await proc.wait()
+        if rc != 0:
+            err = (await proc.stderr.read()).decode("utf-8", "replace").strip()[:TOOL_RESULT_MAX]
+            logger.error(f"[codex] exited {rc}: {err}")
+            yield f"data: {json.dumps({'type': 'error', 'code': 'agent_error', 'text': err or f'codex exited {rc}'})}\n\n"
+            return
+        yield f"data: {json.dumps({'type': 'done', 'session_id': new_session_id})}\n\n"
+
+    except Exception:
+        logger.error(f"Codex agent error: {traceback.format_exc()}")
+        yield f"data: {json.dumps({'type': 'error', 'code': 'agent', 'text': 'Codex agent failed'})}\n\n"
+
+
 async def run_agent_stream(
     prompt: str,
     session_id: Optional[str] = None,
@@ -407,11 +565,12 @@ async def run_agent_stream(
     once with a fresh session so the question still gets answered. The caller
     persists the new session_id, so the conversation continues from there.
     """
+    attempt_fn = _codex_attempt if _is_codex_model(model) else _cli_attempt
     attempt_session = session_id
     for attempt_no in (1, 2):
         produced = False
         retry = False
-        async for sse in _cli_attempt(prompt, attempt_session, model, images):
+        async for sse in attempt_fn(prompt, attempt_session, model, images):
             ev = _parse_sse_line(sse) or {}
             et = ev.get("type")
             if et in ("delta", "thinking", "tool_use", "tool_result"):
@@ -785,11 +944,24 @@ async def chat(request: Request, req: ChatRequest, authorization: Optional[str] 
                 raise HTTPException(status_code=404, detail=f"Image not found: {img['path']}")
 
     conv_id = req.conv_id or "default"
-    msg_id = await chat_store.create_message(conv_id, req.msg_id)
 
-    # Look up session_id from DB — frontend no longer tracks it
+    # Look up the conversation first — a started chat is locked to one backend
+    # (claude vs codex sessions are not interchangeable). Switching backends
+    # mid-conversation is forbidden by design; reject it before creating any
+    # message row. The frontend disables cross-backend options, so this only
+    # trips a stale client or a direct API call.
     existing_conv = await chat_store.get_conversation(conv_id)
     session_id = existing_conv.get("sessionId") if existing_conv else None
+    if existing_conv and (existing_conv.get("messages") or session_id):
+        prev_backend = "codex" if _is_codex_model(existing_conv.get("model")) else "claude"
+        new_backend = "codex" if _is_codex_model(req.model) else "claude"
+        if prev_backend != new_backend:
+            raise HTTPException(
+                status_code=409,
+                detail=f"This chat is running on {prev_backend}; start a new chat to use {new_backend}.",
+            )
+
+    msg_id = await chat_store.create_message(conv_id, req.msg_id)
 
     # Persist a provisional conversation (user message + streaming placeholder)
     # so a refresh mid-answer can find and reopen this turn.
@@ -1084,7 +1256,13 @@ def _attach_image_urls(conversations: list[dict]) -> list[dict]:
 async def list_conversations(request: Request, authorization: Optional[str] = Header(None)):
     verify_token(authorization)
     items = await chat_store.list_conversations(limit=100)
-    return {"conversations": _attach_image_urls(items)}
+    items = _attach_image_urls(items)
+    # Mark which conversations have an in-flight run so the sidebar can show a
+    # live "running" dot regardless of which chat is open.
+    running = await chat_store.get_running_conv_ids()
+    for it in items:
+        it["running"] = it.get("id") in running
+    return {"conversations": items}
 
 
 @app.delete("/v1/conversations/{conv_id}")
