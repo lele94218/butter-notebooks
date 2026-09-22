@@ -122,8 +122,8 @@ The chat backend runs one of two CLIs, chosen by the request's `model`. The fron
 
 | Item | Path |
 |------|------|
-| plist | `~/Library/LaunchAgents/ai.openclaw.butter-notebooks.plist` |
-| launcher | `/Applications/ButterNotebooks.app/Contents/MacOS/butter-notebooks` (copy in `infra/launchd/butter-notebooks-launcher.sh`) |
+| plist | `~/Library/LaunchAgents/ai.openclaw.butter-notebooks.plist` (copy in `infra/launchd/`) |
+| launcher | `infra/launchd/butter-notebooks-launcher.sh` (repo-tracked; plist points here — no longer `/Applications`) |
 | env | `backend/.env` |
 | logs | `/tmp/butter-notebooks.log` |
 | database | `~/.butter-notebooks/chat.db` |
