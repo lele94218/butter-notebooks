@@ -115,6 +115,7 @@ app.add_middleware(
 CLAUDE_BIN = os.environ.get("CLAUDE_BIN", "claude")
 CLAUDE_ALLOWED_TOOLS = "Read,Write,Edit,Glob,Grep,Bash"
 CLAUDE_MODELS = (
+    "claude-opus-5",
     "claude-fable-5",
     "claude-opus-4-8",
     "claude-opus-4-7",
@@ -123,7 +124,7 @@ CLAUDE_MODELS = (
     "claude-sonnet-4-6",
     "claude-haiku-4-5-20251001",
 )
-CLAUDE_DEFAULT_MODEL = "claude-opus-4-8"
+CLAUDE_DEFAULT_MODEL = "claude-opus-5"
 
 # --- Codex CLI backend (OpenAI `codex exec`) ---
 # Selected when the frontend picks one of these model IDs. Each maps to a codex

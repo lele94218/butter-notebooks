@@ -247,12 +247,21 @@ export default function ChatPanel({ convId, initialSessionId, initialMessages, o
     return () => { cancelled = true }
   }, [convId])
 
-  useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
-  }, [messages])
+  // Pin to the latest message. On load and while the user is already at the
+  // bottom, jump instantly (scrollTop = scrollHeight) — smooth scroll gets
+  // interrupted by streaming deltas / late layout (images, KaTeX) on long
+  // threads and drifts upward. If the user scrolled up to read history
+  // (isAtBottom=false), don't yank them. Skipped while paging in older history
+  // (prevScrollHeightRef set), which restores position in its own layout effect.
+  useLayoutEffect(() => {
+    if (!isAtBottom || prevScrollHeightRef.current != null) return
+    const el = chatAreaRef.current
+    if (el) el.scrollTop = el.scrollHeight
+  }, [messages, isAtBottom])
 
   const scrollToBottom = useCallback(() => {
-    bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
+    const el = chatAreaRef.current
+    if (el) el.scrollTop = el.scrollHeight
     setIsAtBottom(true)
   }, [])
 
@@ -311,6 +320,9 @@ export default function ChatPanel({ convId, initialSessionId, initialMessages, o
     const assistantMsg = { role: 'assistant', text: '', thinking: '', streaming: true }
 
     setMessages(prev => [...prev, userMsg, assistantMsg])
+    // Sending always jumps to the bottom so the new question + its processing
+    // indicator are visible even in a long thread (issue #1/#2).
+    setIsAtBottom(true)
 
     let waitTimer = null
     let waitSeconds = 0

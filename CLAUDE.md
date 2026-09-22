@@ -123,7 +123,7 @@ The chat backend runs one of two CLIs, chosen by the request's `model`. The fron
 | Item | Path |
 |------|------|
 | plist | `~/Library/LaunchAgents/ai.openclaw.butter-notebooks.plist` |
-| launcher | `/Applications/ButterNotebooks.app/Contents/MacOS/butter-notebooks` |
+| launcher | `/Applications/ButterNotebooks.app/Contents/MacOS/butter-notebooks` (copy in `infra/launchd/butter-notebooks-launcher.sh`) |
 | env | `backend/.env` |
 | logs | `/tmp/butter-notebooks.log` |
 | database | `~/.butter-notebooks/chat.db` |
@@ -160,6 +160,7 @@ JUPYTER_BASE_URL=/jupyter/  # must match --NotebookApp.base_url=
 - **Kernel plots**: `kernel.py` patches matplotlib to Agg backend and captures figures via `_capture_figure()`. User code just calls `plt.show()` — output streams as base64 PNG via SSE.
 - **Frontend + backend deploy mismatch**: Frontend deploys instantly (rsync to VPS), backend requires `launchctl kickstart`. If they touch the same API contract, deploy both and restart backend.
 - **Jupyter iframe**: Embedded via `/jupyter/lab` (JupyterLab SPA) so files open inside the iframe, not in new browser tabs. Token is fetched from `/v1/jupyter-token` (auth-gated) and passed via URL param. Jupyter must be started with `--ip=0.0.0.0 --NotebookApp.base_url=/jupyter/ --NotebookApp.token=<TOKEN> --NotebookApp.allow_origin=https://your-site.example.com`.
+- **Backend `exit=78` / won't start**: means launchd can't exec the launcher (`/Applications/ButterNotebooks.app/...` missing or the job is stuck in a failed state). `launchctl kickstart -k` does NOT recover from this — do a full reload: `launchctl bootout gui/$(id -u)/ai.openclaw.butter-notebooks && launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/ai.openclaw.butter-notebooks.plist`. If the launcher itself is gone, restore it from `infra/launchd/butter-notebooks-launcher.sh`.
 
 ## Development
 
