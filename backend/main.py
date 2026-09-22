@@ -1355,6 +1355,132 @@ async def delete_conversation(request: Request, conv_id: str, authorization: Opt
     return {"ok": True}
 
 
+# ── OpenAI-compatible shim (for generic clients like Chatbox) ──────────────
+# Exposes GET /v1/models and POST /v1/chat/completions so any OpenAI-compatible
+# app can talk to the claude/codex backend. Stateless: the client sends the full
+# message history each call, which we flatten into one prompt and run fresh (no
+# session resume). Set the client's API host to https://your-site.example.com/v1, path
+# /chat/completions, and the API key to API_TOKEN.
+
+def _oa_extract_text(content) -> str:
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        return "".join(
+            p.get("text", "") for p in content
+            if isinstance(p, dict) and p.get("type") == "text"
+        )
+    return str(content or "")
+
+
+def _oa_messages_to_prompt(messages: list[dict]) -> str:
+    system_parts: list[str] = []
+    convo: list[tuple[str, str]] = []
+    for m in messages or []:
+        role = m.get("role")
+        text = _oa_extract_text(m.get("content")).strip()
+        if not text:
+            continue
+        if role == "system":
+            system_parts.append(text)
+        elif role == "user":
+            convo.append(("User", text))
+        elif role == "assistant":
+            convo.append(("Assistant", text))
+    # Single fresh user turn with no system → just the message.
+    if len(convo) == 1 and convo[0][0] == "User" and not system_parts:
+        return convo[0][1]
+    parts: list[str] = []
+    if system_parts:
+        parts.append("\n".join(system_parts))
+    parts += [f"{role}: {text}" for role, text in convo]
+    return "\n\n".join(parts)
+
+
+def _oa_chunk(cid: str, created: int, model: str, delta: dict, finish=None) -> str:
+    obj = {
+        "id": cid, "object": "chat.completion.chunk", "created": created,
+        "model": model,
+        "choices": [{"index": 0, "delta": delta, "finish_reason": finish}],
+    }
+    return f"data: {json.dumps(obj, ensure_ascii=False)}\n\n"
+
+
+class OAChatRequest(BaseModel):
+    model: Optional[str] = None
+    messages: list[dict] = []
+    stream: Optional[bool] = False
+
+
+@app.get("/v1/models")
+@limiter.limit("60/minute")
+async def openai_models(request: Request, authorization: Optional[str] = Header(None)):
+    verify_token(authorization)
+    import time as _time
+    created = int(_time.time())
+    ids = list(CLAUDE_MODELS) + list(CODEX_MODELS.keys())
+    return {
+        "object": "list",
+        "data": [
+            {"id": i, "object": "model", "created": created, "owned_by": "butter-notebooks"}
+            for i in ids
+        ],
+    }
+
+
+@app.post("/v1/chat/completions")
+@limiter.limit("30/minute")
+async def openai_chat_completions(request: Request, req: OAChatRequest, authorization: Optional[str] = Header(None)):
+    verify_token(authorization)
+    if not req.messages:
+        raise HTTPException(status_code=400, detail="messages is required")
+    import time as _time
+    prompt = _oa_messages_to_prompt(req.messages)
+    mdl = req.model or CLAUDE_DEFAULT_MODEL
+    cid = "chatcmpl-" + uuid.uuid4().hex
+    created = int(_time.time())
+
+    if req.stream:
+        async def gen():
+            yield _oa_chunk(cid, created, mdl, {"role": "assistant"})
+            try:
+                async for sse in run_agent_stream(prompt, None, req.model, None):
+                    ev = _parse_sse_line(sse) or {}
+                    et = ev.get("type")
+                    if et == "delta":
+                        yield _oa_chunk(cid, created, mdl, {"content": ev.get("text", "")})
+                    elif et == "error":
+                        yield _oa_chunk(cid, created, mdl, {"content": f"\n[error: {ev.get('text')}]"})
+                        break
+            except Exception:
+                logger.error(f"openai shim stream failed: {traceback.format_exc()}")
+                yield _oa_chunk(cid, created, mdl, {"content": "\n[error: agent failed]"})
+            yield _oa_chunk(cid, created, mdl, {}, finish="stop")
+            yield "data: [DONE]\n\n"
+        return StreamingResponse(gen(), media_type="text/event-stream")
+
+    parts: list[str] = []
+    err: Optional[str] = None
+    async for sse in run_agent_stream(prompt, None, req.model, None):
+        ev = _parse_sse_line(sse) or {}
+        if ev.get("type") == "delta":
+            parts.append(ev.get("text", ""))
+        elif ev.get("type") == "error":
+            err = ev.get("text")
+    text = "".join(parts)
+    if err and not text:
+        raise HTTPException(status_code=502, detail=err)
+    return {
+        "id": cid, "object": "chat.completion", "created": created, "model": mdl,
+        "choices": [{
+            "index": 0,
+            "message": {"role": "assistant", "content": text},
+            "finish_reason": "stop",
+        }],
+        "usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0},
+    }
+
+
 # ── Code sandbox ──────────────────────────────────────────────
 
 def _safe_code_path(path: str) -> Path:
