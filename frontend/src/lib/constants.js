@@ -25,6 +25,8 @@ export const AGENTS = [
       { id: 'codex-high',      label: 'GPT-6 Astra high' },
       { id: 'codex-luna',      label: 'GPT-6 Luna' },
       { id: 'codex-luna-high', label: 'GPT-6 Luna high' },
+      { id: 'codex-sol',       label: 'GPT-6 Sol' },
+      { id: 'codex-sol-high',  label: 'GPT-6 Sol high' },
     ],
   },
 ]

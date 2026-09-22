@@ -142,6 +142,8 @@ CODEX_MODELS: dict[str, dict] = {
     "codex-high":      {"model": "gpt-6-astra", "effort": "high"},
     "codex-luna":      {"model": "gpt-6-luna", "effort": "medium"},
     "codex-luna-high": {"model": "gpt-6-luna", "effort": "high"},
+    "codex-sol":       {"model": "gpt-6-sol", "effort": "medium"},
+    "codex-sol-high":  {"model": "gpt-6-sol", "effort": "high"},
 }
 
 
@@ -153,6 +155,8 @@ SHIM_MODEL_ALIASES = {
     "gpt-6-astra-high": "codex-high",
     "gpt-6-luna": "codex-luna",
     "gpt-6-luna-high": "codex-luna-high",
+    "gpt-6-sol": "codex-sol",
+    "gpt-6-sol-high": "codex-sol-high",
 }
 
 
