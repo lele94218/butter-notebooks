@@ -17,6 +17,16 @@ export async function fetchConversation(id) {
   return d.conversation || null
 }
 
+export async function apiGenerateTitle(id) {
+  const res = await fetch(`${API_BASE}/v1/conversations/${id}/generate-title`, {
+    method: 'POST',
+    headers: headers(),
+  })
+  if (!res.ok) throw new Error((await res.json().catch(() => ({}))).detail || `HTTP ${res.status}`)
+  const d = await res.json()
+  return d.title
+}
+
 export async function apiDeleteConv(id) {
   await fetch(`${API_BASE}/v1/conversations/${id}`, {
     method: 'DELETE',

@@ -1266,6 +1266,71 @@ async def list_conversations(request: Request, authorization: Optional[str] = He
     return {"conversations": items}
 
 
+def _clean_title(text: str) -> str:
+    """Normalize a model-generated title: one line, no wrapping quotes, ≤60 chars."""
+    t = (text or "").strip()
+    # take the first non-empty line
+    for line in t.splitlines():
+        if line.strip():
+            t = line.strip()
+            break
+    # strip common wrapping quotes / trailing punctuation
+    t = t.strip().strip('"“”‘’\'`').strip()
+    t = t.rstrip(".。!！?？").strip()
+    if len(t) > 60:
+        t = t[:60].rstrip() + "…"
+    return t
+
+
+TITLE_PROMPT = (
+    "Based on our conversation so far, give it a concise title of at most 6 words, "
+    "in the same language as the conversation. Reply with ONLY the title text — "
+    "no quotes, no surrounding punctuation, no preamble, no explanation."
+)
+
+
+@app.post("/v1/conversations/{conv_id}/generate-title")
+@limiter.limit("20/minute")
+async def generate_title(request: Request, conv_id: str, authorization: Optional[str] = Header(None)):
+    """Ask the conversation's own session (resume) for a short title, then set it
+    as the conversation name. Does not add a visible turn to the transcript."""
+    verify_token(authorization)
+    conv = await chat_store.get_conversation(conv_id)
+    if not conv:
+        raise HTTPException(status_code=404, detail="conversation not found")
+    session_id = conv.get("sessionId")
+    if not session_id:
+        raise HTTPException(status_code=409, detail="conversation has no session yet")
+    model = conv.get("model")
+
+    parts: list[str] = []
+    new_session_id = session_id
+    async for sse in run_agent_stream(TITLE_PROMPT, session_id, model, None):
+        ev = _parse_sse_line(sse) or {}
+        et = ev.get("type")
+        if et == "delta":
+            parts.append(ev.get("text", ""))
+        elif et in ("session", "done") and ev.get("session_id"):
+            new_session_id = ev["session_id"]
+        elif et == "error":
+            raise HTTPException(status_code=502, detail=ev.get("text") or "title generation failed")
+
+    title = _clean_title("".join(parts))
+    if not title:
+        raise HTTPException(status_code=502, detail="empty title")
+
+    import time as _time
+    await chat_store.upsert_conversation(
+        conv_id=conv_id,
+        title=title,
+        messages=conv.get("messages") or [],
+        updated_at=int(_time.time() * 1000),
+        session_id=new_session_id,
+        model=model,
+    )
+    return {"title": title}
+
+
 @app.get("/v1/conversations/{conv_id}")
 @limiter.limit("120/minute")
 async def get_conversation(request: Request, conv_id: str, authorization: Optional[str] = Header(None)):

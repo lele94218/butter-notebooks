@@ -34,6 +34,20 @@
 }
 .chat-topbar .agent-select { font-weight: 600; }
 
+.chat-topbar .title-btn {
+  background: var(--bg2);
+  color: var(--text2);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 2px 8px;
+  font-size: 12px;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: color 0.15s, border-color 0.15s;
+}
+.chat-topbar .title-btn:hover:not(:disabled) { color: var(--text); border-color: var(--text3); }
+.chat-topbar .title-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
 .chat-topbar .sid-pill {
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   padding: 2px 8px;

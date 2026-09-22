@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect, useLayoutEffect, useCallback } from 'react'
 import { API_BASE, DEFAULT_MODEL, AGENTS, modelBackend, agentModels, defaultModelForAgent } from '../lib/constants'
-import { headers, fetchConversation } from '../lib/api'
+import { headers, fetchConversation, apiGenerateTitle } from '../lib/api'
 import MdMessage from './MdMessage'
 import AuthImage from './AuthImage'
 import ToolCard from './ToolCard'
@@ -24,7 +24,7 @@ function errorLabel(code) {
   return ERROR_LABELS[code] || code || '错误'
 }
 
-export default function ChatPanel({ convId, initialSessionId, initialMessages, onSaveConversation, model, onModelChange }) {
+export default function ChatPanel({ convId, initialSessionId, initialMessages, onSaveConversation, onRename, model, onModelChange }) {
   const [messages, setMessages] = useState(initialMessages || [])
   const messagesRef = useRef(messages)
   const [input, setInput] = useState('')
@@ -34,6 +34,7 @@ export default function ChatPanel({ convId, initialSessionId, initialMessages, o
   const [visibleCount, setVisibleCount] = useState(INITIAL_VISIBLE_MESSAGES)
   const [isAtBottom, setIsAtBottom] = useState(true)
   const [sessionId, setSessionId] = useState(initialSessionId || null)
+  const [titling, setTitling] = useState(false)
   const bottomRef = useRef(null)
   const textareaRef = useRef(null)
   const fileInputRef = useRef(null)
@@ -385,6 +386,22 @@ export default function ChatPanel({ convId, initialSessionId, initialMessages, o
     } catch {}
   }, [sessionId, convId])
 
+  const genTitle = useCallback(async () => {
+    if (!convId || titling) return
+    setTitling(true)
+    setStatus('generating title…')
+    try {
+      const title = await apiGenerateTitle(convId)
+      onRename?.(convId, title)
+      setStatus(`title: ${title}`)
+      setTimeout(() => setStatus(''), 1600)
+    } catch (e) {
+      setStatus(`title error: ${e.message}`)
+    } finally {
+      setTitling(false)
+    }
+  }, [convId, titling, onRename])
+
   const onKeyDown = (e) => {
     if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
       e.preventDefault()
@@ -425,6 +442,14 @@ export default function ChatPanel({ convId, initialSessionId, initialMessages, o
             <option key={m.id} value={m.id}>{m.label}</option>
           ))}
         </select>
+        <button
+          className="title-btn"
+          onClick={genTitle}
+          disabled={!convId || titling || loading}
+          title="Generate a title for this conversation"
+        >
+          {titling ? '…' : '✨ Title'}
+        </button>
         <span
           className={`sid-pill${sidCopied ? ' sid-pill--copied' : ''}`}
           title={sessionId ? `session: ${sessionId}\nconv: ${convId}` : convId ? `conv: ${convId}` : 'new conversation'}

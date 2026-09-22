@@ -125,6 +125,11 @@ export default function App() {
     localStorage.setItem('butter_active_conv', id)
   }, [model])
 
+  const renameConversation = useCallback((id, title) => {
+    if (!id || !title) return
+    setConversations(prev => prev.map(c => (c.id === id ? { ...c, title } : c)))
+  }, [])
+
   const deleteConversation = (e, id) => {
     e.stopPropagation()
     apiDeleteConv(id)
@@ -199,6 +204,7 @@ export default function App() {
               initialSessionId={activeSessionId}
               initialMessages={activeMessages}
               onSaveConversation={handleSaveConversation}
+              onRename={renameConversation}
               model={model}
               onModelChange={setModel}
             />
