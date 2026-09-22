@@ -21,8 +21,10 @@ export const AGENTS = [
   {
     id: 'codex', label: 'Codex',
     models: [
-      { id: 'codex',      label: 'GPT-6' },
-      { id: 'codex-high', label: 'GPT-6 high' },
+      { id: 'codex',           label: 'GPT-6 Astra' },
+      { id: 'codex-high',      label: 'GPT-6 Astra high' },
+      { id: 'codex-luna',      label: 'GPT-6 Luna' },
+      { id: 'codex-luna-high', label: 'GPT-6 Luna high' },
     ],
   },
 ]

@@ -138,8 +138,10 @@ CLAUDE_DEFAULT_MODEL = "claude-opus-5"
 # + sandbox), mirroring claude's --dangerously-skip-permissions.
 CODEX_BIN = os.environ.get("CODEX_BIN", "codex")
 CODEX_MODELS: dict[str, dict] = {
-    "codex":      {"model": "gpt-6-astra", "effort": "medium"},
-    "codex-high": {"model": "gpt-6-astra", "effort": "high"},
+    "codex":           {"model": "gpt-6-astra", "effort": "medium"},
+    "codex-high":      {"model": "gpt-6-astra", "effort": "high"},
+    "codex-luna":      {"model": "gpt-6-luna", "effort": "medium"},
+    "codex-luna-high": {"model": "gpt-6-luna", "effort": "high"},
 }
 
 
@@ -149,6 +151,8 @@ CODEX_MODELS: dict[str, dict] = {
 SHIM_MODEL_ALIASES = {
     "gpt-6-astra": "codex",
     "gpt-6-astra-high": "codex-high",
+    "gpt-6-luna": "codex-luna",
+    "gpt-6-luna-high": "codex-luna-high",
 }
 
 
