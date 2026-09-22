@@ -215,15 +215,20 @@ export default function ChatPanel({ convId, initialSessionId, initialMessages, o
         const d = await r.json()
         if (cancelled) return
         if (!d.msg_id) {
-          // No live stream. Clear any stale streaming placeholder (e.g. server
-          // restarted mid-turn) so it doesn't spin forever.
+          // Not in-flight: refresh this chat from the server on open, so
+          // switching to it always shows the latest (e.g. a turn that finished
+          // while you were in another chat) instead of the stale sidebar cache.
+          let fresh = null
+          try { fresh = await fetchConversation(convId) } catch {}
+          if (cancelled) return
           setMessages(prev => {
-            if (prev.length && prev[prev.length - 1].streaming) {
-              const msgs = [...prev]
-              msgs[msgs.length - 1] = { ...msgs[msgs.length - 1], streaming: false }
-              return msgs
+            let base = (fresh && Array.isArray(fresh.messages)) ? fresh.messages : prev
+            // No live stream → any trailing streaming placeholder is stale.
+            if (base.length && base[base.length - 1].streaming) {
+              base = [...base]
+              base[base.length - 1] = { ...base[base.length - 1], streaming: false }
             }
-            return prev
+            return base
           })
           return
         }
