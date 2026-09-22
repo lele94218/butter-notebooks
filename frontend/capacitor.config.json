@@ -1,8 +1,0 @@
-{
-  "appId": "com.example.butternotebooks",
-  "appName": "Butter Notebooks",
-  "webDir": "dist",
-  "ios": {
-    "contentInset": "always"
-  }
-}

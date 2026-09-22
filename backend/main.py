@@ -100,13 +100,7 @@ _allow_origins_env = os.environ.get("CORS_ALLOW_ORIGINS", "").strip()
 ALLOW_ORIGINS = (
     [o.strip() for o in _allow_origins_env.split(",") if o.strip()]
     if _allow_origins_env
-    else [
-        "https://your-site.example.com",
-        "http://localhost:5173",
-        # Capacitor iOS app (bundled UI loads from these origins, calls the API cross-origin)
-        "capacitor://localhost",
-        "https://localhost",
-    ]
+    else ["https://your-site.example.com", "http://localhost:5173"]
 )
 
 app.add_middleware(

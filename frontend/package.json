@@ -10,9 +10,6 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "@capacitor/cli": "^8.5.2",
-    "@capacitor/core": "^8.5.2",
-    "@capacitor/ios": "^8.5.2",
     "@monaco-editor/react": "^4.7.0",
     "katex": "^0.16.45",
     "monaco-vim": "^0.4.4",
