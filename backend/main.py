@@ -143,6 +143,24 @@ CODEX_MODELS: dict[str, dict] = {
 }
 
 
+# Public model names for the OpenAI-compatible shim (/v1/models). Codex's
+# internal ids (codex / codex-high) are exposed under the official model name so
+# generic clients like Chatbox show "gpt-6-astra" instead of "codex".
+SHIM_MODEL_ALIASES = {
+    "gpt-6-astra": "codex",
+    "gpt-6-astra-high": "codex-high",
+}
+
+
+def _shim_public_model_ids() -> list[str]:
+    return list(CLAUDE_MODELS) + list(SHIM_MODEL_ALIASES.keys())
+
+
+def _shim_resolve_model(name: Optional[str]) -> Optional[str]:
+    """Map a public shim model name back to the internal id (codex/claude)."""
+    return SHIM_MODEL_ALIASES.get(name or "", name)
+
+
 def _is_codex_model(model: Optional[str]) -> bool:
     return bool(model) and model in CODEX_MODELS
 
@@ -1424,12 +1442,11 @@ async def openai_models(request: Request, authorization: Optional[str] = Header(
     verify_token(authorization)
     import time as _time
     created = int(_time.time())
-    ids = list(CLAUDE_MODELS) + list(CODEX_MODELS.keys())
     return {
         "object": "list",
         "data": [
             {"id": i, "object": "model", "created": created, "owned_by": "butter-notebooks"}
-            for i in ids
+            for i in _shim_public_model_ids()
         ],
     }
 
@@ -1442,7 +1459,8 @@ async def openai_chat_completions(request: Request, req: OAChatRequest, authoriz
         raise HTTPException(status_code=400, detail="messages is required")
     import time as _time
     prompt = _oa_messages_to_prompt(req.messages)
-    mdl = req.model or CLAUDE_DEFAULT_MODEL
+    mdl = req.model or CLAUDE_DEFAULT_MODEL          # public name echoed to the client
+    internal_model = _shim_resolve_model(req.model)  # actual backend id (codex/claude)
     cid = "chatcmpl-" + uuid.uuid4().hex
     created = int(_time.time())
 
@@ -1450,7 +1468,7 @@ async def openai_chat_completions(request: Request, req: OAChatRequest, authoriz
         async def gen():
             yield _oa_chunk(cid, created, mdl, {"role": "assistant"})
             try:
-                async for sse in run_agent_stream(prompt, None, req.model, None):
+                async for sse in run_agent_stream(prompt, None, internal_model, None):
                     ev = _parse_sse_line(sse) or {}
                     et = ev.get("type")
                     if et == "delta":
@@ -1467,7 +1485,7 @@ async def openai_chat_completions(request: Request, req: OAChatRequest, authoriz
 
     parts: list[str] = []
     err: Optional[str] = None
-    async for sse in run_agent_stream(prompt, None, req.model, None):
+    async for sse in run_agent_stream(prompt, None, internal_model, None):
         ev = _parse_sse_line(sse) or {}
         if ev.get("type") == "delta":
             parts.append(ev.get("text", ""))
