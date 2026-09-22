@@ -10,6 +10,13 @@ export async function fetchConversations() {
   return d.conversations || []
 }
 
+export async function fetchConversation(id) {
+  const res = await fetch(`${API_BASE}/v1/conversations/${id}`, { headers: headers() })
+  if (!res.ok) return null
+  const d = await res.json()
+  return d.conversation || null
+}
+
 export async function apiDeleteConv(id) {
   await fetch(`${API_BASE}/v1/conversations/${id}`, {
     method: 'DELETE',

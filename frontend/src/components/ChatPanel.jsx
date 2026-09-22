@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect, useLayoutEffect, useCallback } from 'react'
 import { API_BASE, DEFAULT_MODEL, AGENTS, modelBackend, agentModels, defaultModelForAgent } from '../lib/constants'
-import { headers } from '../lib/api'
+import { headers, fetchConversation } from '../lib/api'
 import MdMessage from './MdMessage'
 import AuthImage from './AuthImage'
 import ToolCard from './ToolCard'
@@ -227,6 +227,18 @@ export default function ChatPanel({ convId, initialSessionId, initialMessages, o
           })
           return
         }
+
+        // In-flight: pull the server's current messages (the provisional
+        // question + placeholder written at send time) so switching back to a
+        // mid-turn chat doesn't render a stale base that's missing the
+        // just-sent question. The cached copy from the sidebar lags here. #3
+        try {
+          const fresh = await fetchConversation(convId)
+          if (cancelled) return
+          if (fresh && Array.isArray(fresh.messages) && fresh.messages.length) {
+            setMessages(fresh.messages)
+          }
+        } catch {}
 
         setMessages(prev => {
           if (prev.length > 0 && prev[prev.length - 1].streaming) return prev

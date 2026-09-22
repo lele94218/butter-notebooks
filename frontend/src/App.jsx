@@ -96,6 +96,8 @@ export default function App() {
     setModel(conv.model || DEFAULT_MODEL)
     setTab('chat')
     localStorage.setItem('butter_active_conv', conv.id)
+    // Fresh base messages for an in-flight conversation are pulled inside
+    // ChatPanel's pending/resume effect (avoids racing the live stream). #3
   }
 
   const handleSaveConversation = useCallback((messages, firstUserMsg, stableConvId) => {

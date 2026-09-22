@@ -1266,6 +1266,22 @@ async def list_conversations(request: Request, authorization: Optional[str] = He
     return {"conversations": items}
 
 
+@app.get("/v1/conversations/{conv_id}")
+@limiter.limit("120/minute")
+async def get_conversation(request: Request, conv_id: str, authorization: Optional[str] = Header(None)):
+    """Current server-side state of one conversation, including the provisional
+    user message + streaming placeholder written at the start of an in-flight
+    turn. Used when opening a chat so a mid-flight question isn't stale."""
+    verify_token(authorization)
+    conv = await chat_store.get_conversation(conv_id)
+    if not conv:
+        raise HTTPException(status_code=404, detail="conversation not found")
+    conv = _attach_image_urls([conv])[0]
+    running = await chat_store.get_running_conv_ids()
+    conv["running"] = conv.get("id") in running
+    return {"conversation": conv}
+
+
 @app.delete("/v1/conversations/{conv_id}")
 @limiter.limit("30/minute")
 async def delete_conversation(request: Request, conv_id: str, authorization: Optional[str] = Header(None)):
