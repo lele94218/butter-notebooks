@@ -106,6 +106,12 @@ ALLOW_ORIGINS = (
 app.add_middleware(
     CORSMiddleware,
     allow_origins=ALLOW_ORIGINS,
+    # Allow any origin's preflight to succeed. This API is gated by the Bearer
+    # API_TOKEN (not cookies), so CORS is not the security boundary — but generic
+    # OpenAI-compatible clients (Chatbox iOS, etc.) send a CORS preflight from an
+    # app/webview origin we can't enumerate. The regex echoes the caller's origin
+    # back, which (unlike "*") is compatible with allow_credentials.
+    allow_origin_regex=".*",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
