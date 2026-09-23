@@ -471,10 +471,13 @@ async def _codex_attempt(
     # Skip-permission mode: bypass approvals + sandbox, like claude's
     # --dangerously-skip-permissions. Codex can read/write/run freely.
     BYPASS = "--dangerously-bypass-approvals-and-sandbox"
+    # NOTE: `-i/--image` is variadic (`<FILE>...`), so the positional PROMPT must
+    # come BEFORE the image args — otherwise codex swallows the prompt as another
+    # image path, finds no prompt, and fails with "No prompt provided via stdin".
     if session_id:
         cmd = [CODEX_BIN, "exec", "resume", session_id, "--json", "--skip-git-repo-check", BYPASS]
-        cmd += img_args
         cmd.append(prompt)
+        cmd += img_args
     else:
         cmd = [CODEX_BIN, "exec", "--json", "--skip-git-repo-check", BYPASS]
         cfg = CODEX_MODELS.get(model or "", {})
@@ -482,9 +485,9 @@ async def _codex_attempt(
             cmd += ["-m", cfg["model"]]
         if cfg.get("effort"):
             cmd += ["-c", f"model_reasoning_effort={cfg['effort']}"]
-        cmd += img_args
         # Nudge output formatting to match the app's Markdown/KaTeX renderer.
         cmd.append(CLAUDE_SYSTEM_PROMPT + "\n\n" + prompt)
+        cmd += img_args
 
     env = {k: v for k, v in os.environ.items() if k != "CLAUDECODE"}
 
