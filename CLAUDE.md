@@ -103,6 +103,7 @@ The chat backend runs one of two CLIs, chosen by the request's `model`. The fron
 `GET /v1/models` + `POST /v1/chat/completions` let generic OpenAI clients (e.g. **Chatbox iOS**) use the backend. Stateless: the client sends the full history each call, flattened into one prompt run fresh (no session resume). Codex ids are exposed under their official names via `SHIM_MODEL_ALIASES` (e.g. `gpt-6-astra` ↔ internal `codex`). Client config: API host `https://your-site.example.com/v1`, path `/chat/completions`, key = `API_TOKEN`.
 
 - **CORS**: `allow_origin_regex=".*"` (echoes the caller's origin) so webview clients' preflights pass — auth is the Bearer `API_TOKEN`, not CORS.
+- **Images**: `GET /v1/img?p=<abs>&t=<API_TOKEN>` serves image files under allowed roots (NOTES_ROOT / CODE_ROOT / uploads / DATA_DIR); token via query so a markdown `<img>` works. The shim scans the assistant's output for local image paths and appends/rewrites them to `![image](<served url>)` so clients like Chatbox render them (the agent still has to actually produce the file). `PUBLIC_BASE_URL` env sets the public host.
 - **Caveat**: no resume. iOS backgrounding drops the connection → the turn fails with no recovery (unlike the web app's `/v1/chat`, which persists + resumes). Use the web app for long turns.
 
 ## Deploy

@@ -1439,6 +1439,85 @@ def _oa_chunk(cid: str, created: int, model: str, delta: dict, finish=None) -> s
     return f"data: {json.dumps(obj, ensure_ascii=False)}\n\n"
 
 
+# --- Agent-produced image serving (so markdown images render in Chatbox etc.) ---
+import re as _re
+
+PUBLIC_BASE_URL = os.environ.get("PUBLIC_BASE_URL", "https://your-site.example.com").rstrip("/")
+IMG_EXTS = (".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp")
+_ALLOWED_IMG_ROOTS = [
+    Path(NOTES_ROOT).resolve(),
+    Path(CODE_ROOT).resolve(),
+    UPLOADS_ROOT_RESOLVED,
+    DATA_DIR.resolve(),
+]
+_IMG_PATH_RE = _re.compile(r"/[^\s`\"'()<>\]]+\.(?:png|jpe?g|gif|webp|bmp)", _re.IGNORECASE)
+
+
+def _img_under_allowed(path: Path) -> bool:
+    for root in _ALLOWED_IMG_ROOTS:
+        try:
+            path.relative_to(root)
+            return True
+        except ValueError:
+            continue
+    return False
+
+
+def _img_serve_url(abspath: str) -> str:
+    import urllib.parse
+    return f"{PUBLIC_BASE_URL}/v1/img?p={urllib.parse.quote(abspath)}&t={urllib.parse.quote(API_TOKEN)}"
+
+
+def _served_images_from_text(text: str) -> list[tuple[str, str]]:
+    """Local image paths in `text` that exist under an allowed root → [(raw, url)]."""
+    out: list[tuple[str, str]] = []
+    seen: set[str] = set()
+    for m in _IMG_PATH_RE.finditer(text or ""):
+        raw = m.group(0)
+        if raw in seen:
+            continue
+        try:
+            p = Path(raw).resolve()
+        except Exception:
+            continue
+        if p.is_file() and p.suffix.lower() in IMG_EXTS and _img_under_allowed(p):
+            seen.add(raw)
+            out.append((raw, _img_serve_url(str(p))))
+    return out
+
+
+def _rewrite_images_inline(text: str) -> str:
+    """Replace local image paths with served URLs, and ensure each renders as a
+    markdown image (append one if it wasn't already inline)."""
+    served = _served_images_from_text(text)
+    for raw, url in served:
+        text = text.replace(raw, url)
+    for _raw, url in served:
+        if f"]({url})" not in text and f"](<{url}>)" not in text:
+            text += f"\n\n![image]({url})"
+    return text
+
+
+@app.get("/v1/img")
+@limiter.limit("120/minute")
+async def serve_image(request: Request, p: str, t: str = ""):
+    """Serve an agent-produced image so a markdown <img src> works in clients
+    like Chatbox. Token via ?t= (an <img> can't send an auth header). Only image
+    files under allowed roots are served."""
+    if t != API_TOKEN:
+        raise HTTPException(status_code=403, detail="bad token")
+    try:
+        path = Path(p).resolve()
+    except Exception:
+        raise HTTPException(status_code=400, detail="bad path")
+    if path.suffix.lower() not in IMG_EXTS or not path.is_file():
+        raise HTTPException(status_code=404, detail="not an image")
+    if not _img_under_allowed(path):
+        raise HTTPException(status_code=403, detail="path not allowed")
+    mt = mimetypes.guess_type(str(path))[0] or "application/octet-stream"
+    return FileResponse(path, media_type=mt)
+
+
 class OAChatRequest(BaseModel):
     model: Optional[str] = None
     messages: list[dict] = []
@@ -1476,18 +1555,25 @@ async def openai_chat_completions(request: Request, req: OAChatRequest, authoriz
     if req.stream:
         async def gen():
             yield _oa_chunk(cid, created, mdl, {"role": "assistant"})
+            buf: list[str] = []
             try:
                 async for sse in run_agent_stream(prompt, None, internal_model, None):
                     ev = _parse_sse_line(sse) or {}
                     et = ev.get("type")
                     if et == "delta":
-                        yield _oa_chunk(cid, created, mdl, {"content": ev.get("text", "")})
+                        t = ev.get("text", "")
+                        buf.append(t)
+                        yield _oa_chunk(cid, created, mdl, {"content": t})
                     elif et == "error":
                         yield _oa_chunk(cid, created, mdl, {"content": f"\n[error: {ev.get('text')}]"})
                         break
             except Exception:
                 logger.error(f"openai shim stream failed: {traceback.format_exc()}")
                 yield _oa_chunk(cid, created, mdl, {"content": "\n[error: agent failed]"})
+            # Append any agent-produced images as markdown so the client renders
+            # them (the raw path was already streamed as text).
+            for _raw, url in _served_images_from_text("".join(buf)):
+                yield _oa_chunk(cid, created, mdl, {"content": f"\n\n![image]({url})"})
             yield _oa_chunk(cid, created, mdl, {}, finish="stop")
             yield "data: [DONE]\n\n"
         return StreamingResponse(gen(), media_type="text/event-stream")
@@ -1503,6 +1589,7 @@ async def openai_chat_completions(request: Request, req: OAChatRequest, authoriz
     text = "".join(parts)
     if err and not text:
         raise HTTPException(status_code=502, detail=err)
+    text = _rewrite_images_inline(text)
     return {
         "id": cid, "object": "chat.completion", "created": created, "model": mdl,
         "choices": [{
