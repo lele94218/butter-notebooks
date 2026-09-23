@@ -1455,7 +1455,13 @@ _ALLOWED_IMG_ROOTS = [
 # is optional/uncaptured — the replacement always re-adds it. Group 1 = "[alt](" (+
 # optional space/`<`), group 2 = filesystem path, group 3 = closing.
 _MD_IMG_RE = _re.compile(
-    r"!?(\[[^\]]*\]\(\s*<?)(?:file://)?(/(?:[^)\s<>]|%20)+\.(?:png|jpe?g|gif|webp|bmp))(\s*>?\s*\))",
+    r"!?(\[[^\]]*\]\(\s*)"                                            # 1: "[alt]( "
+    r"(?:"
+    r"<(?:file://)?(/[^>]+?\.(?:png|jpe?g|gif|webp|bmp))\s*>"         # 2: <angle path> — spaces ok
+    r"|"
+    r"(?:file://)?(/(?:[^)\s<>]|%20)+\.(?:png|jpe?g|gif|webp|bmp))"   # 3: bare path — no spaces
+    r")"
+    r"(\s*\))",                                                        # 4: ")"
     _re.IGNORECASE,
 )
 # Streaming: detect a still-forming image markdown at the buffer tail so we hold
@@ -1485,13 +1491,13 @@ def _rewrite_md_images(text: str) -> str:
     import urllib.parse
 
     def repl(m):
-        fs = urllib.parse.unquote(m.group(2))
+        fs = urllib.parse.unquote((m.group(2) or m.group(3) or "").strip())
         try:
             p = Path(fs).resolve()
         except Exception:
             return m.group(0)
         if p.is_file() and p.suffix.lower() in IMG_EXTS and _img_under_allowed(p):
-            return "!" + m.group(1) + _img_serve_url(str(p)) + m.group(3)
+            return "!" + m.group(1) + _img_serve_url(str(p)) + m.group(4)
         return m.group(0)
 
     return _MD_IMG_RE.sub(repl, text or "")
