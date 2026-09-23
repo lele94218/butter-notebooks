@@ -1449,11 +1449,13 @@ _ALLOWED_IMG_ROOTS = [
     Path("/tmp").resolve(),
     Path("/private/tmp").resolve(),
 ]
-# Only rewrite images that are in markdown image syntax: ![alt](path) where path
-# is a local file (bare or file://). Group 1 = "![alt](" (+ optional space/`<`),
-# group 2 = filesystem path, group 3 = closing (optional `>`/space + `)`).
+# Rewrite markdown image/link refs to a local image file → served image, IN PLACE
+# (no appended copy). Handles both `![alt](path)` (image) and `[alt](path)` (link);
+# a link to a local image is upgraded to an image so it renders. The leading `!`
+# is optional/uncaptured — the replacement always re-adds it. Group 1 = "[alt](" (+
+# optional space/`<`), group 2 = filesystem path, group 3 = closing.
 _MD_IMG_RE = _re.compile(
-    r"(!\[[^\]]*\]\(\s*<?)(?:file://)?(/(?:[^)\s<>]|%20)+\.(?:png|jpe?g|gif|webp|bmp))(\s*>?\s*\))",
+    r"!?(\[[^\]]*\]\(\s*<?)(?:file://)?(/(?:[^)\s<>]|%20)+\.(?:png|jpe?g|gif|webp|bmp))(\s*>?\s*\))",
     _re.IGNORECASE,
 )
 # Streaming: detect a still-forming image markdown at the buffer tail so we hold
@@ -1489,7 +1491,7 @@ def _rewrite_md_images(text: str) -> str:
         except Exception:
             return m.group(0)
         if p.is_file() and p.suffix.lower() in IMG_EXTS and _img_under_allowed(p):
-            return m.group(1) + _img_serve_url(str(p)) + m.group(3)
+            return "!" + m.group(1) + _img_serve_url(str(p)) + m.group(3)
         return m.group(0)
 
     return _MD_IMG_RE.sub(repl, text or "")
