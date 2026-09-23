@@ -1445,12 +1445,16 @@ import re as _re
 PUBLIC_BASE_URL = os.environ.get("PUBLIC_BASE_URL", "https://your-site.example.com").rstrip("/")
 IMG_EXTS = (".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp")
 _ALLOWED_IMG_ROOTS = [
-    Path(NOTES_ROOT).resolve(),
-    Path(CODE_ROOT).resolve(),
-    UPLOADS_ROOT_RESOLVED,
-    DATA_DIR.resolve(),
+    Path.home().resolve(),          # covers Downloads/Desktop/Documents, notes, code, data
+    Path("/tmp").resolve(),
+    Path("/private/tmp").resolve(),
 ]
-_IMG_PATH_RE = _re.compile(r"/[^\s`\"'()<>\]]+\.(?:png|jpe?g|gif|webp|bmp)", _re.IGNORECASE)
+# Matches a local image path, optionally wrapped in a file:// URI. Group 1 is the
+# filesystem path; group 0 (incl. any file://) is what gets replaced in the text.
+_IMG_PATH_RE = _re.compile(
+    r"(?:file://)?(/(?:[^\s`\"'()<>\]]|%20)+\.(?:png|jpe?g|gif|webp|bmp))",
+    _re.IGNORECASE,
+)
 
 
 def _img_under_allowed(path: Path) -> bool:
@@ -1469,20 +1473,24 @@ def _img_serve_url(abspath: str) -> str:
 
 
 def _served_images_from_text(text: str) -> list[tuple[str, str]]:
-    """Local image paths in `text` that exist under an allowed root → [(raw, url)]."""
+    """Local image paths (bare or file://) in `text` that exist under an allowed
+    root → [(matched_text, served_url)]. matched_text includes any file:// prefix
+    so callers can replace the whole reference."""
+    import urllib.parse
     out: list[tuple[str, str]] = []
     seen: set[str] = set()
     for m in _IMG_PATH_RE.finditer(text or ""):
-        raw = m.group(0)
-        if raw in seen:
+        full = m.group(0)   # includes file:// if present
+        fs = urllib.parse.unquote(m.group(1))
+        if full in seen:
             continue
         try:
-            p = Path(raw).resolve()
+            p = Path(fs).resolve()
         except Exception:
             continue
         if p.is_file() and p.suffix.lower() in IMG_EXTS and _img_under_allowed(p):
-            seen.add(raw)
-            out.append((raw, _img_serve_url(str(p))))
+            seen.add(full)
+            out.append((full, _img_serve_url(str(p))))
     return out
 
 
