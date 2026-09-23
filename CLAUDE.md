@@ -86,8 +86,8 @@ sent as conv_id in every request     looked up from DB, never sent by frontend
 The chat backend runs one of two CLIs, chosen by the request's `model`. The frontend splits selection into two dropdowns: **Agent** (Claude / Codex) + **Model**.
 
 - **Dispatch**: `run_agent_stream` picks `_codex_attempt` if `_is_codex_model(model)` else `_cli_attempt`. Both yield the same SSE event contract (`session` / `thinking` / `tool_use` / `tool_result` / `delta` / `done` / `error`), so the frontend renders both identically.
-- **Claude** (`_cli_attempt`): `claude -p ... --dangerously-skip-permissions`, stream-json. Models in `CLAUDE_MODELS`.
-- **Codex** (`_codex_attempt`): `codex exec --json --dangerously-bypass-approvals-and-sandbox` (skip-permission, mirrors claude). `CODEX_MODELS` maps ids → `{model, effort}`; only `gpt-6-astra` has full metadata here. Resume via `codex exec resume <thread_id>`. Codex JSONL events (`thread.started`, `item.completed{agent_message|reasoning|command_execution}`, `turn.completed`) are mapped to the SSE contract.
+- **Claude** (`_cli_attempt`): `claude -p ... --dangerously-skip-permissions`, stream-json. Models in `CLAUDE_MODELS`; default `claude-opus-5-5`. To add a model, put its id in `CLAUDE_MODELS` (backend) + `AGENTS` (frontend) and verify the CLI actually uses it (session `.jsonl` records `"model":"..."` — watch for silent fallback).
+- **Codex** (`_codex_attempt`): `codex exec --json --dangerously-bypass-approvals-and-sandbox` (skip-permission, mirrors claude). `CODEX_MODELS` maps internal ids (`codex`, `codex-luna`, …) → `{model, effort}`. GPT-6 codename models that work on a **ChatGPT-account** Codex: `gpt-6-astra`, `gpt-6-luna`, `gpt-6-sol` (each medium + high via `model_reasoning_effort`). `gpt-6` / `gpt-6-pro` return "not supported when using Codex with a ChatGPT account". Resume via `codex exec resume <thread_id>`. Codex JSONL events (`thread.started`, `item.completed{agent_message|reasoning|command_execution}`, `turn.completed`) are mapped to the SSE contract.
 - **session_id** is backend-specific and **not interchangeable** (claude `--resume` token vs codex `thread_id`). Switching backends mid-conversation is **forbidden by design**: the frontend disables the other agent once a chat has started; the backend returns **409** as a safety net.
 - **Self-heal**: an expired/foreign session (resume yields no output) retries once with a fresh session.
 - Both are skip-permission → can read/write/run freely on the Mac. `cwd=NOTES_ROOT`.
@@ -97,6 +97,13 @@ The chat backend runs one of two CLIs, chosen by the request's `model`. The fron
 - **In-flight refresh**: the active conv id is stored in `localStorage['butter_active_conv']` at send time; on reload App restores it and ChatPanel's pending/resume effect reattaches the live stream (question + thinking indicator survive a refresh).
 - **Sidebar running dot**: `/v1/conversations` returns a per-conv `running` flag (any `status='streaming'` message); the sidebar shows a pulsing green dot, polled every 4s, so an in-flight run is visible from any chat.
 - **Errors**: backend error SSE events carry a `code`; the frontend renders an inline error card and persists it to the transcript so it survives a refresh.
+
+### OpenAI-compatible shim
+
+`GET /v1/models` + `POST /v1/chat/completions` let generic OpenAI clients (e.g. **Chatbox iOS**) use the backend. Stateless: the client sends the full history each call, flattened into one prompt run fresh (no session resume). Codex ids are exposed under their official names via `SHIM_MODEL_ALIASES` (e.g. `gpt-6-astra` ↔ internal `codex`). Client config: API host `https://your-site.example.com/v1`, path `/chat/completions`, key = `API_TOKEN`.
+
+- **CORS**: `allow_origin_regex=".*"` (echoes the caller's origin) so webview clients' preflights pass — auth is the Bearer `API_TOKEN`, not CORS.
+- **Caveat**: no resume. iOS backgrounding drops the connection → the turn fails with no recovery (unlike the web app's `/v1/chat`, which persists + resumes). Use the web app for long turns.
 
 ## Deploy
 
