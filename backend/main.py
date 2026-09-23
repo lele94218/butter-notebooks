@@ -1449,12 +1449,17 @@ _ALLOWED_IMG_ROOTS = [
     Path("/tmp").resolve(),
     Path("/private/tmp").resolve(),
 ]
-# Matches a local image path, optionally wrapped in a file:// URI. Group 1 is the
-# filesystem path; group 0 (incl. any file://) is what gets replaced in the text.
-_IMG_PATH_RE = _re.compile(
-    r"(?:file://)?(/(?:[^\s`\"'()<>\]]|%20)+\.(?:png|jpe?g|gif|webp|bmp))",
+# Only rewrite images that are in markdown image syntax: ![alt](path) where path
+# is a local file (bare or file://). Group 1 = "![alt](" (+ optional space/`<`),
+# group 2 = filesystem path, group 3 = closing (optional `>`/space + `)`).
+_MD_IMG_RE = _re.compile(
+    r"(!\[[^\]]*\]\(\s*<?)(?:file://)?(/(?:[^)\s<>]|%20)+\.(?:png|jpe?g|gif|webp|bmp))(\s*>?\s*\))",
     _re.IGNORECASE,
 )
+# Streaming: detect a still-forming image markdown at the buffer tail so we hold
+# it back until complete (then rewrite it) instead of streaming a broken path.
+_MD_IMG_COMPLETE = _re.compile(r"!\[[^\]]*\]\([^)]*\)")
+_MD_IMG_PREFIX = _re.compile(r"!\[[^\]]*\]?(\([^)]*)?$")
 
 
 def _img_under_allowed(path: Path) -> bool:
@@ -1472,38 +1477,37 @@ def _img_serve_url(abspath: str) -> str:
     return f"{PUBLIC_BASE_URL}/v1/img?p={urllib.parse.quote(abspath)}&t={urllib.parse.quote(API_TOKEN)}"
 
 
-def _served_images_from_text(text: str) -> list[tuple[str, str]]:
-    """Local image paths (bare or file://) in `text` that exist under an allowed
-    root → [(matched_text, served_url)]. matched_text includes any file:// prefix
-    so callers can replace the whole reference."""
+def _rewrite_md_images(text: str) -> str:
+    """Rewrite `![alt](local-path)` markdown images to `![alt](served-url)` when
+    the path is a real image under an allowed root. Leaves everything else alone."""
     import urllib.parse
-    out: list[tuple[str, str]] = []
-    seen: set[str] = set()
-    for m in _IMG_PATH_RE.finditer(text or ""):
-        full = m.group(0)   # includes file:// if present
-        fs = urllib.parse.unquote(m.group(1))
-        if full in seen:
-            continue
+
+    def repl(m):
+        fs = urllib.parse.unquote(m.group(2))
         try:
             p = Path(fs).resolve()
         except Exception:
-            continue
+            return m.group(0)
         if p.is_file() and p.suffix.lower() in IMG_EXTS and _img_under_allowed(p):
-            seen.add(full)
-            out.append((full, _img_serve_url(str(p))))
-    return out
+            return m.group(1) + _img_serve_url(str(p)) + m.group(3)
+        return m.group(0)
+
+    return _MD_IMG_RE.sub(repl, text or "")
 
 
-def _rewrite_images_inline(text: str) -> str:
-    """Replace local image paths with served URLs, and ensure each renders as a
-    markdown image (append one if it wasn't already inline)."""
-    served = _served_images_from_text(text)
-    for raw, url in served:
-        text = text.replace(raw, url)
-    for _raw, url in served:
-        if f"]({url})" not in text and f"](<{url}>)" not in text:
-            text += f"\n\n![image]({url})"
-    return text
+def _safe_emit_len(buf: str) -> int:
+    """How many chars of `buf` are safe to stream now — i.e. not part of an
+    image markdown that is still being written (and may need rewriting once
+    complete)."""
+    idx = buf.rfind("![")
+    if idx == -1:
+        return len(buf)
+    tail = buf[idx:]
+    if _MD_IMG_COMPLETE.match(tail):
+        return len(buf)      # complete image → safe (rewritten on emit)
+    if _MD_IMG_PREFIX.match(tail):
+        return idx           # still forming → hold back from '!['
+    return len(buf)          # '![…' that can't become an image → safe
 
 
 @app.get("/v1/img")
@@ -1563,25 +1567,25 @@ async def openai_chat_completions(request: Request, req: OAChatRequest, authoriz
     if req.stream:
         async def gen():
             yield _oa_chunk(cid, created, mdl, {"role": "assistant"})
-            buf: list[str] = []
+            buf = ""  # holds back a possibly-forming image markdown until complete
             try:
                 async for sse in run_agent_stream(prompt, None, internal_model, None):
                     ev = _parse_sse_line(sse) or {}
                     et = ev.get("type")
                     if et == "delta":
-                        t = ev.get("text", "")
-                        buf.append(t)
-                        yield _oa_chunk(cid, created, mdl, {"content": t})
+                        buf += ev.get("text", "")
+                        n = _safe_emit_len(buf)
+                        if n > 0:
+                            emit, buf = buf[:n], buf[n:]
+                            yield _oa_chunk(cid, created, mdl, {"content": _rewrite_md_images(emit)})
                     elif et == "error":
                         yield _oa_chunk(cid, created, mdl, {"content": f"\n[error: {ev.get('text')}]"})
                         break
             except Exception:
                 logger.error(f"openai shim stream failed: {traceback.format_exc()}")
                 yield _oa_chunk(cid, created, mdl, {"content": "\n[error: agent failed]"})
-            # Append any agent-produced images as markdown so the client renders
-            # them (the raw path was already streamed as text).
-            for _raw, url in _served_images_from_text("".join(buf)):
-                yield _oa_chunk(cid, created, mdl, {"content": f"\n\n![image]({url})"})
+            if buf:
+                yield _oa_chunk(cid, created, mdl, {"content": _rewrite_md_images(buf)})
             yield _oa_chunk(cid, created, mdl, {}, finish="stop")
             yield "data: [DONE]\n\n"
         return StreamingResponse(gen(), media_type="text/event-stream")
@@ -1597,7 +1601,7 @@ async def openai_chat_completions(request: Request, req: OAChatRequest, authoriz
     text = "".join(parts)
     if err and not text:
         raise HTTPException(status_code=502, detail=err)
-    text = _rewrite_images_inline(text)
+    text = _rewrite_md_images(text)
     return {
         "id": cid, "object": "chat.completion", "created": created, "model": mdl,
         "choices": [{
