@@ -8,6 +8,7 @@ export const AGENTS = [
   {
     id: 'claude', label: 'Claude',
     models: [
+      { id: 'claude-opus-5-5',           label: 'Opus 5.5' },
       { id: 'claude-opus-5',             label: 'Opus 5' },
       { id: 'claude-fable-5',            label: 'Fable 5' },
       { id: 'claude-opus-4-8',           label: 'Opus 4.8' },
@@ -33,7 +34,7 @@ export const AGENTS = [
 
 // Flat list kept for lookups / back-compat.
 export const MODELS = AGENTS.flatMap(a => a.models)
-export const DEFAULT_MODEL = 'claude-opus-5'
+export const DEFAULT_MODEL = 'claude-opus-5-5'
 
 // Which agent (CLI backend) a model id belongs to.
 export function modelBackend(id) {
