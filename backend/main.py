@@ -1430,6 +1430,67 @@ def _oa_messages_to_prompt(messages: list[dict]) -> str:
     return "\n\n".join(parts)
 
 
+_OA_MIME_EXT = {
+    "image/png": ".png", "image/jpeg": ".jpg", "image/jpg": ".jpg",
+    "image/gif": ".gif", "image/webp": ".webp",
+}
+
+
+def _oa_extract_images(messages: list[dict]) -> list[dict]:
+    """Pull image_url parts from the LAST user message (OpenAI vision format),
+    save them under UPLOADS_DIR, and return [{path, mime}] for run_agent_stream.
+    Handles data: URIs (base64) and http(s) URLs."""
+    import base64 as _b64
+    import urllib.request
+
+    last_user = None
+    for m in messages or []:
+        if m.get("role") == "user":
+            last_user = m
+    content = last_user.get("content") if last_user else None
+    if not isinstance(content, list):
+        return []
+
+    out: list[dict] = []
+    for part in content:
+        if not isinstance(part, dict):
+            continue
+        iu = part.get("image_url")
+        if part.get("type") == "image_url":
+            url = iu.get("url") if isinstance(iu, dict) else iu
+        elif part.get("type") == "image" and isinstance(part.get("source"), dict):
+            src = part["source"]
+            url = f"data:{src.get('media_type','image/png')};base64,{src.get('data','')}" if src.get("data") else src.get("url")
+        else:
+            continue
+        if not url:
+            continue
+        try:
+            if url.startswith("data:"):
+                header, _, b64 = url.partition(",")
+                mime = header[5:].split(";")[0] or "image/png"
+                data = _b64.b64decode(b64)
+            elif url.startswith("http"):
+                with urllib.request.urlopen(url, timeout=15) as r:
+                    data = r.read()
+                    mime = (r.headers.get("Content-Type") or "image/png").split(";")[0]
+            else:
+                continue
+        except Exception:
+            logger.warning(f"openai shim: failed to load an inbound image: {traceback.format_exc()}")
+            continue
+        if not data or len(data) > MAX_UPLOAD_BYTES:
+            continue
+        ext = _OA_MIME_EXT.get(mime, ".png")
+        p = UPLOADS_DIR / f"oa-{uuid.uuid4().hex}{ext}"
+        try:
+            p.write_bytes(data)
+        except Exception:
+            continue
+        out.append({"path": str(p), "mime": mime})
+    return out
+
+
 def _oa_chunk(cid: str, created: int, model: str, delta: dict, finish=None) -> str:
     obj = {
         "id": cid, "object": "chat.completion.chunk", "created": created,
@@ -1569,6 +1630,7 @@ async def openai_chat_completions(request: Request, req: OAChatRequest, authoriz
     prompt = _oa_messages_to_prompt(req.messages)
     mdl = req.model or CLAUDE_DEFAULT_MODEL          # public name echoed to the client
     internal_model = _shim_resolve_model(req.model)  # actual backend id (codex/claude)
+    images = _oa_extract_images(req.messages) or None  # attachments from the client
     cid = "chatcmpl-" + uuid.uuid4().hex
     created = int(_time.time())
 
@@ -1577,7 +1639,7 @@ async def openai_chat_completions(request: Request, req: OAChatRequest, authoriz
             yield _oa_chunk(cid, created, mdl, {"role": "assistant"})
             buf = ""  # holds back a possibly-forming image markdown until complete
             try:
-                async for sse in run_agent_stream(prompt, None, internal_model, None):
+                async for sse in run_agent_stream(prompt, None, internal_model, images):
                     ev = _parse_sse_line(sse) or {}
                     et = ev.get("type")
                     if et == "delta":
@@ -1600,7 +1662,7 @@ async def openai_chat_completions(request: Request, req: OAChatRequest, authoriz
 
     parts: list[str] = []
     err: Optional[str] = None
-    async for sse in run_agent_stream(prompt, None, internal_model, None):
+    async for sse in run_agent_stream(prompt, None, internal_model, images):
         ev = _parse_sse_line(sse) or {}
         if ev.get("type") == "delta":
             parts.append(ev.get("text", ""))
