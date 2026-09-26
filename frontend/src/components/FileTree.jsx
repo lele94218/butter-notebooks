@@ -1,21 +1,42 @@
-const IconFolderOpen = () => (
-  <svg width="14" height="14" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg" style={{flexShrink:0}}>
-    <path d="M1.5 3.5A1 1 0 0 1 2.5 2.5H6l1.5 1.5H13.5A1 1 0 0 1 14.5 5V12.5A1 1 0 0 1 13.5 13.5H2.5A1 1 0 0 1 1.5 12.5V3.5Z" fill="currentColor" fillOpacity="0.25" stroke="currentColor" strokeWidth="1" strokeLinejoin="round"/>
-    <path d="M1.5 6.5H14.5L13 12.5H3L1.5 6.5Z" fill="currentColor" fillOpacity="0.35" stroke="currentColor" strokeWidth="0.8" strokeLinejoin="round"/>
+// Chevron used as the expand/collapse affordance (VSCode-style: it rotates).
+const IconChevron = () => (
+  <svg className="tree-chevron-svg" width="12" height="12" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+    <path d="M6 4L10 8L6 12" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"/>
   </svg>
 )
 
-const IconFolderClosed = () => (
-  <svg width="14" height="14" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg" style={{flexShrink:0}}>
-    <path d="M1.5 3.5A1 1 0 0 1 2.5 2.5H6l1.5 1.5H13.5A1 1 0 0 1 14.5 5V12.5A1 1 0 0 1 13.5 13.5H2.5A1 1 0 0 1 1.5 12.5V3.5Z" fill="currentColor" fillOpacity="0.2" stroke="currentColor" strokeWidth="1" strokeLinejoin="round"/>
+const IconFolder = ({ open }) => (
+  <svg width="15" height="15" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg" style={{ flexShrink: 0 }}>
+    {open ? (
+      <path d="M1.8 12.8V4.2a.9.9 0 0 1 .9-.9h3.1l1.3 1.5h5.4a.9.9 0 0 1 .9.9v.9H4.6a.9.9 0 0 0-.86.65L1.8 12.8Z"
+        fill="currentColor" fillOpacity="0.9"/>
+    ) : (
+      <path d="M1.8 4.2a.9.9 0 0 1 .9-.9h3.1l1.3 1.5h6.1a.9.9 0 0 1 .9.9v6.1a.9.9 0 0 1-.9.9H2.7a.9.9 0 0 1-.9-.9V4.2Z"
+        fill="currentColor" fillOpacity="0.75"/>
+    )}
+    {open && (
+      <path d="M3.74 6.75A.9.9 0 0 1 4.6 6.1h9.3a.6.6 0 0 1 .57.79l-1.6 5a.9.9 0 0 1-.86.62H2.5l1.24-5.76Z"
+        fill="currentColor" fillOpacity="0.45"/>
+    )}
+  </svg>
+)
+
+// Markdown file icon — page outline with a small "M↓" so notes read as notes.
+const IconMarkdown = () => (
+  <svg width="14" height="14" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg" style={{ flexShrink: 0 }}>
+    <path d="M3.8 1.8h5l3.4 3.4v9a.6.6 0 0 1-.6.6H3.8a.6.6 0 0 1-.6-.6V2.4a.6.6 0 0 1 .6-.6Z"
+      stroke="currentColor" strokeWidth="1.1" strokeLinejoin="round" fill="currentColor" fillOpacity="0.08"/>
+    <path d="M8.8 1.9v3.4h3.3" stroke="currentColor" strokeWidth="1.1" strokeLinecap="round" strokeLinejoin="round"/>
+    <path d="M5.1 12.2V8.6l1.6 1.9 1.6-1.9v3.6" stroke="currentColor" strokeWidth="1.05" strokeLinecap="round" strokeLinejoin="round"/>
+    <path d="M10.4 8.9v3.2m0 0 1-1m-1 1-1-1" stroke="currentColor" strokeWidth="1.05" strokeLinecap="round" strokeLinejoin="round"/>
   </svg>
 )
 
 const IconFile = () => (
-  <svg width="12" height="12" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg" style={{flexShrink:0}}>
-    <path d="M3.5 1.5H9.5L12.5 4.5V14.5A0.5 0.5 0 0 1 12 15H4A0.5 0.5 0 0 1 3.5 14.5V1.5Z" fill="currentColor" fillOpacity="0.15" stroke="currentColor" strokeWidth="1" strokeLinejoin="round"/>
-    <path d="M9.5 1.5V4.5H12.5" stroke="currentColor" strokeWidth="1" strokeLinecap="round" strokeLinejoin="round"/>
-    <path d="M5.5 7.5H10.5M5.5 9.5H10.5M5.5 11.5H8.5" stroke="currentColor" strokeWidth="0.8" strokeLinecap="round"/>
+  <svg width="14" height="14" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg" style={{ flexShrink: 0 }}>
+    <path d="M3.8 1.8h5l3.4 3.4v9a.6.6 0 0 1-.6.6H3.8a.6.6 0 0 1-.6-.6V2.4a.6.6 0 0 1 .6-.6Z"
+      stroke="currentColor" strokeWidth="1.1" strokeLinejoin="round" fill="currentColor" fillOpacity="0.08"/>
+    <path d="M8.8 1.9v3.4h3.3" stroke="currentColor" strokeWidth="1.1" strokeLinecap="round" strokeLinejoin="round"/>
   </svg>
 )
 
@@ -33,6 +54,10 @@ export function buildTree(paths) {
   return root
 }
 
+// Indent per level. The guide line for a level sits at the parent's icon column.
+const INDENT = 13
+const PAD_LEFT = 6
+
 export default function FileTree({ tree, depth = 0, selectedNote, onSelect, openDirs, toggleDir }) {
   return (
     <>
@@ -46,39 +71,44 @@ export default function FileTree({ tree, depth = 0, selectedNote, onSelect, open
             const key = name + depth
             const open = openDirs[key] !== false
             return (
-              <div key={key}>
+              <div key={key} className="tree-branch">
                 <div
-                  className="tree-dir"
-                  style={{ paddingLeft: 8 + depth * 14 + 'px' }}
+                  className={`tree-row tree-dir ${open ? 'is-open' : ''}`}
+                  style={{ paddingLeft: PAD_LEFT + depth * INDENT + 'px' }}
                   onClick={() => toggleDir(key)}
+                  title={name}
                 >
-                  <span className="tree-arrow">{open ? '▾' : '▸'}</span>
-                  {open ? <IconFolderOpen /> : <IconFolderClosed />}
-                  <span className="tree-dir-name">{name}</span>
+                  <span className="tree-chevron"><IconChevron /></span>
+                  <span className="tree-icon tree-icon--dir"><IconFolder open={open} /></span>
+                  <span className="tree-label">{name}</span>
                 </div>
                 {open && (
-                  <FileTree
-                    tree={node.__children}
-                    depth={depth + 1}
-                    selectedNote={selectedNote}
-                    onSelect={onSelect}
-                    openDirs={openDirs}
-                    toggleDir={toggleDir}
-                  />
+                  <div className="tree-children" style={{ '--guide-left': PAD_LEFT + depth * INDENT + 12 + 'px' }}>
+                    <FileTree
+                      tree={node.__children}
+                      depth={depth + 1}
+                      selectedNote={selectedNote}
+                      onSelect={onSelect}
+                      openDirs={openDirs}
+                      toggleDir={toggleDir}
+                    />
+                  </div>
                 )}
               </div>
             )
           }
+          const isMd = /\.md$/i.test(name)
           return (
             <div
               key={node.__path}
-              className={`note-item tree-file ${selectedNote === node.__path ? 'active' : ''}`}
-              style={{ paddingLeft: 8 + depth * 14 + 'px' }}
+              className={`tree-row tree-file ${selectedNote === node.__path ? 'active' : ''}`}
+              style={{ paddingLeft: PAD_LEFT + depth * INDENT + 'px' }}
               title={node.__path}
               onClick={() => onSelect(node.__path)}
             >
-              <IconFile />
-              <span>{name.replace(/\.md$/, '')}</span>
+              <span className="tree-chevron" />
+              <span className="tree-icon">{isMd ? <IconMarkdown /> : <IconFile />}</span>
+              <span className="tree-label">{name.replace(/\.md$/i, '')}</span>
             </div>
           )
         })}

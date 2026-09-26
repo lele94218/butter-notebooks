@@ -126,45 +126,87 @@
 .conv-item:hover .conv-delete { opacity: 1; }
 .conv-delete:hover { color: var(--text); }
 
-/* File tree */
-.tree-dir {
+/* File tree — compact VSCode/Obsidian-style rows with indent guides */
+.tree-row {
+  position: relative;
   display: flex;
   align-items: center;
-  gap: 5px;
-  padding: 4px 8px 4px 0;
-  font-size: 12px;
-  font-weight: 500;
+  gap: 4px;
+  height: 24px;
+  padding-right: 8px;
+  font-size: 12.5px;
+  line-height: 1;
   color: var(--text2);
   cursor: pointer;
   user-select: none;
-  transition: color 0.1s;
 }
-.tree-dir:hover { color: var(--text); }
-.tree-dir svg { opacity: 0.7; }
-.tree-dir:hover svg { opacity: 1; }
-.tree-dir-name {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+.tree-row:hover { background: var(--bg3); color: var(--text); }
+
+/* Indent guide: a hairline at the parent's icon column. */
+.tree-children { position: relative; }
+.tree-children::before {
+  content: '';
+  position: absolute;
+  left: var(--guide-left, 12px);
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: var(--border);
+  opacity: 0.55;
+  pointer-events: none;
 }
-.tree-arrow {
-  font-size: 8px;
-  flex-shrink: 0;
-  color: var(--text3);
-  width: 10px;
-}
-.tree-file {
+
+.tree-chevron {
+  flex: none;
+  width: 12px;
+  height: 12px;
   display: flex;
   align-items: center;
-  gap: 6px;
+  justify-content: center;
+  color: var(--text3);
 }
-.tree-file svg { opacity: 0.5; transition: opacity 0.1s; }
-.tree-file:hover svg, .tree-file.active svg { opacity: 0.9; }
-.tree-file span {
+.tree-chevron-svg { transition: transform 0.12s ease; }
+.tree-dir.is-open .tree-chevron-svg { transform: rotate(90deg); }
+.tree-row:hover .tree-chevron { color: var(--text2); }
+
+.tree-icon {
+  flex: none;
+  display: flex;
+  align-items: center;
+  opacity: 0.62;
+  transition: opacity 0.1s;
+}
+.tree-row:hover .tree-icon, .tree-row.active .tree-icon { opacity: 0.95; }
+.tree-icon--dir { color: var(--accent); opacity: 0.8; }
+.tree-row:hover .tree-icon--dir { opacity: 1; }
+
+.tree-label {
+  flex: 1;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
+.tree-dir .tree-label {
+  font-weight: 550;
+  color: var(--text);
+  opacity: 0.85;
+}
+
+/* Selected file: subtle fill + accent bar, not a heavy block. */
+.tree-file.active {
+  background: color-mix(in srgb, var(--accent) 13%, transparent);
+  color: var(--text);
+}
+.tree-file.active::before {
+  content: '';
+  position: absolute;
+  left: 0; top: 0; bottom: 0;
+  width: 2px;
+  background: var(--accent);
+}
+.tree-file.active .tree-label { font-weight: 550; }
 
 .sidebar-empty {
   padding: 16px 14px;
@@ -495,7 +537,8 @@
   .sidebar--collapsed .sidebar-header > span { display: revert; }
 
   .note-item { padding: 10px 14px; font-size: 14px; }
-  .tree-dir  { padding: 8px 8px 8px 0; font-size: 13px; }
+  /* Roomier touch targets on phones, same compact structure. */
+  .tree-row  { height: 32px; font-size: 13.5px; }
   .tab       { padding: 12px 14px; font-size: 13px; }
 
   .conv-delete { opacity: 0.6; }

@@ -2,9 +2,16 @@
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-VPS="root@vmi868767.your-tailnet.ts.net"
-SSH_KEY="$HOME/.ssh/id_ed25519"
-PLIST_LABEL="ai.openclaw.butter-notebooks"
+
+# Host-specific settings live in deploy.env (gitignored). Copy deploy.env.example
+# to deploy.env and fill in your own values, or export these in your shell.
+[ -f "$SCRIPT_DIR/deploy.env" ] && . "$SCRIPT_DIR/deploy.env"
+
+VPS="${VPS:?set VPS (e.g. root@your-vps.example.com) in deploy.env}"
+WEB_ROOT="${WEB_ROOT:-/var/www/butter-notebooks}"
+SITE_URL="${SITE_URL:-https://your-site.example.com}"
+SSH_KEY="${SSH_KEY:-$HOME/.ssh/id_ed25519}"
+PLIST_LABEL="${PLIST_LABEL:-ai.openclaw.butter-notebooks}"
 
 deploy_frontend() {
   echo "==> Building frontend..."
@@ -13,14 +20,14 @@ deploy_frontend() {
 
   echo "==> Uploading to VPS..."
   rsync -az --delete -e "ssh -i $SSH_KEY" \
-    dist/ "$VPS:/var/www/butter-notebooks/"
+    dist/ "$VPS:$WEB_ROOT/"
 
   ssh -i "$SSH_KEY" "$VPS" "
-    find /var/www/butter-notebooks -not -path '*/_stats*' -type d -exec chmod 755 {} + &&
-    find /var/www/butter-notebooks -not -path '*/_stats*' -type f -exec chmod 644 {} + &&
-    chown -R www-data:www-data /var/www/butter-notebooks
+    find $WEB_ROOT -not -path '*/_stats*' -type d -exec chmod 755 {} + &&
+    find $WEB_ROOT -not -path '*/_stats*' -type f -exec chmod 644 {} + &&
+    chown -R www-data:www-data $WEB_ROOT
   "
-  echo "==> Frontend deployed → https://your-site.example.com"
+  echo "==> Frontend deployed → $SITE_URL"
 }
 
 deploy_backend() {

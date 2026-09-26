@@ -17,7 +17,15 @@ venv/
 .DS_Store
 *.log
 
+# host-specific deploy settings (hostnames, paths) — see deploy.env.example
+deploy.env
+# real values behind the placeholders in CLAUDE.md
+LOCAL.md
+
 # runtime data / model artifacts (not source)
 backend/butter.db
 *.pt
 data/
+
+# built frontend config (real host)
+frontend/.env.production

@@ -96,11 +96,14 @@ async def _startup():
 async def _shutdown():
     await kernel_manager.shutdown()
 
+# Public origin of the deployed site. Set PUBLIC_BASE_URL in backend/.env.
+PUBLIC_BASE_URL = os.environ.get("PUBLIC_BASE_URL", "http://localhost:8765").rstrip("/")
+
 _allow_origins_env = os.environ.get("CORS_ALLOW_ORIGINS", "").strip()
 ALLOW_ORIGINS = (
     [o.strip() for o in _allow_origins_env.split(",") if o.strip()]
     if _allow_origins_env
-    else ["https://your-site.example.com", "http://localhost:5173"]
+    else [PUBLIC_BASE_URL, "http://localhost:5173"]
 )
 
 app.add_middleware(
@@ -1506,7 +1509,6 @@ def _oa_chunk(cid: str, created: int, model: str, delta: dict, finish=None) -> s
 # --- Agent-produced image serving (so markdown images render in Chatbox etc.) ---
 import re as _re
 
-PUBLIC_BASE_URL = os.environ.get("PUBLIC_BASE_URL", "https://your-site.example.com").rstrip("/")
 IMG_EXTS = (".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp")
 _ALLOWED_IMG_ROOTS = [
     Path.home().resolve(),          # covers Downloads/Desktop/Documents, notes, code, data

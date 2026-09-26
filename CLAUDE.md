@@ -11,7 +11,7 @@ Claude-powered Markdown notebook web app with chat, notes viewer, and Python cod
 └──────────────────────┬──────────────────────────────────────┘
                        │ HTTPS (Tailscale / nginx reverse proxy)
 ┌──────────────────────▼──────────────────────────────────────┐
-│  VPS (vmi868767.your-tailnet.ts.net)                          │
+│  VPS (your-vps.example.com)                          │
 │  nginx serves static dist/ + proxies /v1/* & /jupyter/*     │
 └──────────────────────┬──────────────────────────────────────┘
                        │ Tailscale internal
@@ -117,7 +117,7 @@ The chat backend runs one of two CLIs, chosen by the request's `model`. The fron
 
 - Frontend: builds with `npm run build`, rsync's to VPS, fixes perms
 - Backend: `launchctl kickstart -k` the plist, verifies process started
-- VPS host: `root@vmi868767.your-tailnet.ts.net`, path `/var/www/butter-notebooks/`
+- VPS host: `root@your-vps.example.com`, path `/var/www/butter-notebooks/`
 
 > **Never bare `rsync -a`** — preserves Mac UID/perms → nginx 403.
 > `deploy.sh` runs `chmod` + `chown www-data` after transfer.
@@ -141,9 +141,9 @@ The chat backend runs one of two CLIs, chosen by the request's `model`. The fron
 
 ```
 API_TOKEN=...
-NOTES_ROOT=/Users/you/Library/Mobile Documents/iCloud~md~obsidian/Documents/claw-learning
-CODE_ROOT=/Users/you/works/deep-learnings
-SANDBOX_PYTHON=/Users/you/works/ComfyUI/venv/bin/python3
+NOTES_ROOT=$HOME/path/to/your/notes-vault
+CODE_ROOT=$HOME/path/to/your/code
+SANDBOX_PYTHON=$HOME/path/to/sandbox-venv/bin/python3
 TTS_ENGINE=edge
 JUPYTER_TOKEN=...           # must match --NotebookApp.token= on jupyter-notebook
 JUPYTER_BASE_URL=/jupyter/  # must match --NotebookApp.base_url=
@@ -159,7 +159,7 @@ JUPYTER_BASE_URL=/jupyter/  # must match --NotebookApp.base_url=
 - Backend venv: Homebrew Python 3.14 (`backend/.venv`)
 - Code sandbox venv: ComfyUI (`SANDBOX_PYTHON`, has torch/numpy/matplotlib)
 - Notes file scan uses `subprocess find` (not `rglob`) to avoid blocking asyncio under launchd TCC
-- Jupyter runs from ComfyUI venv (`/Users/you/works/ComfyUI/venv/bin/jupyter-notebook`), port 8888, `--ip=0.0.0.0`. Must listen on all interfaces for Tailscale proxy to reach it. nginx strips `X-Frame-Options` and `Content-Security-Policy` headers to allow iframe embedding.
+- Jupyter runs from ComfyUI venv (`$HOME/path/to/sandbox-venv/bin/jupyter-notebook`), port 8888, `--ip=0.0.0.0`. Must listen on all interfaces for Tailscale proxy to reach it. nginx strips `X-Frame-Options` and `Content-Security-Policy` headers to allow iframe embedding.
 
 ## Known Issues / Gotchas
 

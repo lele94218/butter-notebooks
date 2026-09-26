@@ -15,7 +15,7 @@
 	<string>ai.openclaw.butter-notebooks</string>
 	<key>ProgramArguments</key>
 	<array>
-		<string>/Users/you/works/claude-projects/butter-notebooks/infra/launchd/butter-notebooks-launcher.sh</string>
+		<string>/path/to/butter-notebooks/infra/launchd/butter-notebooks-launcher.sh</string>
 	</array>
 	<key>RunAtLoad</key>
 	<true/>
@@ -24,6 +24,6 @@
 	<key>StandardOutPath</key>
 	<string>/tmp/butter-notebooks.log</string>
 	<key>WorkingDirectory</key>
-	<string>/Users/you/works/claude-projects/butter-notebooks/backend</string>
+	<string>/path/to/butter-notebooks/backend</string>
 </dict>
 </plist>

@@ -14,15 +14,15 @@ Regenerated every 5 minutes from nginx access logs.
 
 ```bash
 scp -i ~/.ssh/id_ed25519 infra/goaccess/goaccess-update.sh \
-  root@vmi868767.your-tailnet.ts.net:/usr/local/bin/goaccess-update.sh
+  root@your-vps.example.com:/usr/local/bin/goaccess-update.sh
 
-ssh -i ~/.ssh/id_ed25519 root@vmi868767.your-tailnet.ts.net \
+ssh -i ~/.ssh/id_ed25519 root@your-vps.example.com \
   "chmod +x /usr/local/bin/goaccess-update.sh && /usr/local/bin/goaccess-update.sh"
 ```
 
 ## Rotate password
 
 ```bash
-ssh -i ~/.ssh/id_ed25519 root@vmi868767.your-tailnet.ts.net \
+ssh -i ~/.ssh/id_ed25519 root@your-vps.example.com \
   "htpasswd /etc/nginx/auth/butter-stats.htpasswd butter"
 ```

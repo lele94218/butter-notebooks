@@ -1,6 +1,6 @@
 # VPS nginx config
 
-Live paths on VPS `vmi868767`:
+Live paths on VPS `your-vps`:
 - `/etc/nginx/sites-enabled/your-site.example.com` ← `your-site.example.com.conf`
 - `/etc/nginx/sites-enabled/your-other-site.example.com`  ← `your-other-site.example.com.conf` (410 tombstone)
 - `/etc/nginx/conf.d/rate-limits.conf`     ← `rate-limits.conf`
@@ -11,18 +11,18 @@ To apply changes:
 
 ```bash
 scp -i ~/.ssh/id_ed25519 infra/nginx/rate-limits.conf \
-  root@vmi868767.your-tailnet.ts.net:/etc/nginx/conf.d/rate-limits.conf
+  root@your-vps.example.com:/etc/nginx/conf.d/rate-limits.conf
 
 scp -i ~/.ssh/id_ed25519 infra/nginx/logging.conf \
-  root@vmi868767.your-tailnet.ts.net:/etc/nginx/conf.d/logging.conf
+  root@your-vps.example.com:/etc/nginx/conf.d/logging.conf
 
 scp -i ~/.ssh/id_ed25519 infra/nginx/your-site.example.com.conf \
-  root@vmi868767.your-tailnet.ts.net:/etc/nginx/sites-enabled/your-site.example.com
+  root@your-vps.example.com:/etc/nginx/sites-enabled/your-site.example.com
 
 scp -i ~/.ssh/id_ed25519 infra/nginx/your-other-site.example.com.conf \
-  root@vmi868767.your-tailnet.ts.net:/etc/nginx/sites-enabled/your-other-site.example.com
+  root@your-vps.example.com:/etc/nginx/sites-enabled/your-other-site.example.com
 
-ssh -i ~/.ssh/id_ed25519 root@vmi868767.your-tailnet.ts.net \
+ssh -i ~/.ssh/id_ed25519 root@your-vps.example.com \
   "nginx -t && nginx -s reload"
 ```
 
