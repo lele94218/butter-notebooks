@@ -19,7 +19,10 @@ export default function NotesPanel() {
   const [openDirs, setOpenDirs] = useState({})
   const [content, setContent] = useState('')
   const [loading, setLoading] = useState(false)
-  const [treeOpen, setTreeOpen] = useState(true)
+  // On phones the tree is an overlay drawer, so start collapsed (content first).
+  const [treeOpen, setTreeOpen] = useState(
+    () => !window.matchMedia('(max-width: 600px)').matches
+  )
 
   const refreshNotes = useCallback(() => {
     fetch(`${API_BASE}/v1/notes`, { headers: headers() })
@@ -33,6 +36,8 @@ export default function NotesPanel() {
   const selectNote = (f) => {
     setSelectedNote(f)
     localStorage.setItem('butter_last_note', f)
+    // On phones the tree is an overlay — close it once a note is picked.
+    if (window.matchMedia('(max-width: 600px)').matches) setTreeOpen(false)
   }
 
   useEffect(() => {
@@ -47,6 +52,7 @@ export default function NotesPanel() {
 
   return (
     <div className="notes-layout">
+      {treeOpen && <div className="notes-tree-backdrop" onClick={() => setTreeOpen(false)} />}
       {treeOpen && (
         <div className="notes-filetree">
           <div className="notes-filetree-header">
@@ -68,7 +74,10 @@ export default function NotesPanel() {
 
       <div className="note-panel">
         {!treeOpen && (
-          <button className="notes-expand-btn" onClick={() => setTreeOpen(true)} title="Show file tree">&raquo;</button>
+          <button className="notes-expand-btn" onClick={() => setTreeOpen(true)} title="Show file tree">
+            <span className="notes-expand-icon">&#9776;</span>
+            <span className="notes-expand-text">Files</span>
+          </button>
         )}
         {!selectedNote ? (
           <div className="empty-state">

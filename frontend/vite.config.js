@@ -27,14 +27,19 @@ export default defineConfig({
       },
       workbox: {
         // Precache the app shell only.
-        globPatterns: ['**/*.{js,css,html,svg,png,woff,woff2,ttf}'],
+        globPatterns: ['**/*.{js,css,svg,png,woff,woff2,ttf}'],
         maximumFileSizeToCacheInBytes: 6 * 1024 * 1024,
-        // NEVER cache the API: responses are token-gated, streamed (SSE) and
-        // live data. Let every /v1/* request go straight to the network.
-        navigateFallbackDenylist: [/^\/v1\//, /^\/jupyter\//],
+        // Don't serve the SPA shell for anything that isn't the app itself.
+        // /v1/* is token-gated streaming API; /jupyter/* is a separate app
+        // rendered in an iframe — both must always hit the network untouched.
+        navigateFallback: '/index.html',
+        navigateFallbackDenylist: [/^\/v1\//, /^\/jupyter\//, /^\/_stats\//, /^\/health/],
         runtimeCaching: [
           {
-            urlPattern: ({ url }) => url.pathname.startsWith('/v1/') || url.pathname.startsWith('/jupyter/'),
+            urlPattern: ({ url }) =>
+              url.pathname.startsWith('/v1/') ||
+              url.pathname.startsWith('/jupyter/') ||
+              url.pathname.startsWith('/_stats/'),
             handler: 'NetworkOnly',
           },
         ],
