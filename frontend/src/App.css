@@ -494,9 +494,12 @@
   .sidebar {
     position: fixed;
     left: 0;
+    /* Pin to both edges instead of setting a height: -webkit-fill-available
+       under-reports in a standalone PWA (no browser chrome), which left the
+       drawer short of the bottom of the screen. */
     top: 0;
-    height: 100%;
-    height: -webkit-fill-available;
+    bottom: 0;
+    height: auto;
     padding-top: env(safe-area-inset-top);
     padding-bottom: env(safe-area-inset-bottom);
     z-index: 200;
