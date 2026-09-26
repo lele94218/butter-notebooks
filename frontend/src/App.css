@@ -16,7 +16,8 @@
 .sidebar {
   width: 230px;
   min-width: 230px;
-  background: var(--bg2);
+  /* Same surface as the main content — separated by the border, not a shade */
+  background: var(--bg);
   border-right: 1px solid var(--border);
   display: flex;
   flex-direction: column;
