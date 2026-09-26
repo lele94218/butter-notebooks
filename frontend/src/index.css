@@ -84,7 +84,9 @@ html[data-theme="light"] {
 }
 
 body {
-  background: var(--bg4);
+  /* Matches .app so any safe-area strip in a standalone PWA blends in
+     instead of showing as a darker band. */
+  background: var(--bg);
   color: var(--text);
   font-family: var(--font-sans);
   line-height: 1.65;

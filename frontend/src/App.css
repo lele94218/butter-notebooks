@@ -2,9 +2,12 @@
   display: flex;
   height: calc(100dvh - var(--keyboard-offset, 0px));
   overflow: hidden;
-  background: var(--bg4);
+  /* In a standalone PWA there is no browser chrome, so the safe-area strips
+     at the top/bottom are painted by the app itself. Use the main content
+     colour here (not --bg4) and let children own the insets, otherwise the
+     status-bar and home-indicator bands read as darker "cut off" bars. */
+  background: var(--bg);
   transition: background 0.2s, color 0.2s;
-  padding-top: env(safe-area-inset-top);
   padding-left: env(safe-area-inset-left);
   padding-right: env(safe-area-inset-right);
 }
@@ -286,6 +289,9 @@
   align-items: center;
   border-bottom: 1px solid var(--border);
   padding: 0 16px;
+  /* Owns the top inset so the status-bar strip is the tab bar's own colour */
+  padding-top: env(safe-area-inset-top);
+  background: var(--bg);
 }
 
 .menu-btn {
