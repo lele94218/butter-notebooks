@@ -168,3 +168,38 @@
   margin: 4px 0;
   display: block;
 }
+
+/* Backdrop only exists as an overlay on phones */
+.code-tree-backdrop { display: none; }
+.code-expand-btn { display: inline-flex; align-items: center; gap: 6px; }
+.code-expand-icon { font-size: 1.05em; line-height: 1; }
+
+@media (max-width: 600px) {
+  /* Slide-over tree instead of a fixed 200px column stealing editor width */
+  .code-panel { position: relative; }
+  .code-filetree {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: 0;
+    z-index: 20;
+    width: 78%;
+    max-width: 300px;
+    background: var(--bg2);
+    box-shadow: 0 0 24px rgba(0, 0, 0, 0.45);
+  }
+  .code-tree-backdrop {
+    display: block;
+    position: absolute;
+    inset: 0;
+    z-index: 19;
+    background: rgba(0, 0, 0, 0.45);
+  }
+  /* Roomier tap targets in the tree */
+  .code-file-item { padding: 9px 10px; font-size: 13.5px; }
+}
+
+@media (max-width: 600px) {
+  /* Keep the output pane clear of the home indicator in standalone PWA */
+  .code-output { padding-bottom: calc(10px + env(safe-area-inset-bottom)); }
+}

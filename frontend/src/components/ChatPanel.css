@@ -511,4 +511,11 @@ textarea::placeholder { color: var(--text2); }
 
 @media (max-width: 600px) {
   .chat-area { -webkit-overflow-scrolling: touch; }
+  /* iOS zooms the page when focusing an input smaller than 16px. */
+  textarea { font-size: 16px; }
+  /* Comfortable tap targets for the topbar controls */
+  .chat-topbar .model-select,
+  .chat-topbar .agent-select,
+  .chat-topbar .title-btn { padding: 5px 9px; font-size: 13px; }
+  .send-btn, .attach-btn { width: 34px; height: 34px; }
 }

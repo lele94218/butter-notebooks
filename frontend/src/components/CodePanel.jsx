@@ -17,7 +17,10 @@ export default function CodePanel() {
   const [saving, setSaving] = useState(false)
   const [vimMode, setVimMode] = useState(false)
   const [outputHeight, setOutputHeight] = useState(200)
-  const [filetreeOpen, setFiletreeOpen] = useState(true)
+  // On phones the tree is an overlay drawer, so start collapsed (editor first).
+  const [filetreeOpen, setFiletreeOpen] = useState(
+    () => !window.matchMedia('(max-width: 600px)').matches
+  )
   const sessionId = useRef('code-' + Math.random().toString(36).slice(2))
   const vimRef = useRef(null)
   const editorRef = useRef(null)
@@ -62,7 +65,13 @@ export default function CodePanel() {
     if (entry.is_dir) { loadDir(entry.path); return }
     fetch(`${API_BASE}/v1/files/read?path=${encodeURIComponent(entry.path)}`, { headers: headers() })
       .then(r => r.json())
-      .then(d => { setOpenFile(entry); setCode(d.content || ''); setOutput([]); localStorage.setItem('butter_code_file', entry.path) })
+      .then(d => {
+        setOpenFile(entry); setCode(d.content || ''); setOutput([])
+        localStorage.setItem('butter_code_file', entry.path)
+        // On phones the tree is an overlay — close it once a file is opened
+        // (directories keep it open so you can keep browsing).
+        if (window.matchMedia('(max-width: 600px)').matches) setFiletreeOpen(false)
+      })
   }
 
   const saveFile = async () => {
@@ -126,6 +135,7 @@ export default function CodePanel() {
 
   return (
     <div className="code-panel">
+      {filetreeOpen && <div className="code-tree-backdrop" onClick={() => setFiletreeOpen(false)} />}
       {filetreeOpen && (
         <div className="code-filetree">
           <div className="code-filetree-header">
@@ -152,7 +162,10 @@ export default function CodePanel() {
       <div className="code-main">
         <div className="code-toolbar">
           {!filetreeOpen && (
-            <button className="code-btn code-expand-btn" onClick={() => setFiletreeOpen(true)} title="Show file tree">&raquo;</button>
+            <button className="code-btn code-expand-btn" onClick={() => setFiletreeOpen(true)} title="Show file tree">
+              <span className="code-expand-icon">&#9776;</span>
+              <span className="code-expand-text">Files</span>
+            </button>
           )}
           <span className="code-filename">{openFile ? openFile.path : '---'}</span>
           <button className="code-btn code-run-btn" onClick={runCode} disabled={running}>
