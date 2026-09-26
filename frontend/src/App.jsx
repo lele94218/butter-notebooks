@@ -39,12 +39,7 @@ export default function App() {
 
   const [convId, setConvId] = useState(null)
   const [model, setModel] = useState(DEFAULT_MODEL)
-  const [tab, setTab] = useState(() => {
-    const saved = localStorage.getItem('butter_last_tab') || 'chat'
-    // The Jupyter tab is hidden on phones; don't restore into a tab with no way back.
-    if (saved === 'notebook' && window.matchMedia('(max-width: 600px)').matches) return 'chat'
-    return saved
-  })
+  const [tab, setTab] = useState(() => localStorage.getItem('butter_last_tab') || 'chat')
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
 
@@ -199,8 +194,7 @@ export default function App() {
           <div className={`tab ${tab === 'chat' ? 'active' : ''}`} onClick={() => { setTab('chat'); localStorage.setItem('butter_last_tab', 'chat') }}>Chat</div>
           <div className={`tab ${tab === 'notes' ? 'active' : ''}`} onClick={() => { setTab('notes'); localStorage.setItem('butter_last_tab', 'notes') }}>Notes</div>
           <div className={`tab ${tab === 'code' ? 'active' : ''}`} onClick={() => { setTab('code'); localStorage.setItem('butter_last_tab', 'code') }}>Code</div>
-          {/* JupyterLab is a desktop UI — unusable on a phone, so hide the tab there */}
-          <div className={`tab tab--desktop-only ${tab === 'notebook' ? 'active' : ''}`} onClick={() => { setTab('notebook'); localStorage.setItem('butter_last_tab', 'notebook') }}>Jupyter</div>
+          <div className={`tab ${tab === 'notebook' ? 'active' : ''}`} onClick={() => { setTab('notebook'); localStorage.setItem('butter_last_tab', 'notebook') }}>Jupyter</div>
         </div>
 
         {tab === 'chat'
