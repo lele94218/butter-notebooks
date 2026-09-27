@@ -135,3 +135,18 @@
      home indicator. */
   .note-panel { padding-bottom: calc(16px + env(safe-area-inset-bottom)); }
 }
+
+@media (max-width: 600px) {
+  /* Apple HIG: 44pt touch targets for the tree header controls */
+  .notes-refresh-btn,
+  .notes-collapse-btn {
+    min-width: var(--tap);
+    min-height: var(--tap);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 17px;
+  }
+  .notes-expand-btn { min-height: var(--tap); padding: 0 14px; font-size: 14px; }
+  .notes-filetree-header { padding-right: 4px; }
+}

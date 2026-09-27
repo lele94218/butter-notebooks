@@ -264,6 +264,10 @@
   --chat-padding-top: 32px;
   --msg-padding-x: 24px;
   --note-padding: 32px 40px;
+  /* Minimum hit area. Apple HIG requires 44×44pt for touch targets; on a
+     pointer device a smaller visual control is fine, so this shrinks on
+     desktop and is raised to 44px in the phone media query below. */
+  --tap: 30px;
 }
 @media (max-width: 600px) {
   :root {
@@ -273,6 +277,7 @@
     --chat-padding-top: 12px;
     --msg-padding-x: 12px;
     --note-padding: 16px 14px;
+    --tap: 44px;   /* Apple HIG minimum touch target */
   }
 }
 
@@ -547,12 +552,40 @@
   .sidebar--collapsed .sidebar-footer,
   .sidebar--collapsed .sidebar-header > span { display: revert; }
 
-  .note-item { padding: 10px 14px; font-size: 14px; }
-  /* Roomier touch targets on phones, same compact structure. */
-  .tree-row  { height: 32px; font-size: 13.5px; }
-  .tab       { padding: 12px 14px; font-size: 13px; }
+  /* Apple HIG: interactive rows and controls get a 44pt hit area. */
+  .note-item {
+    min-height: var(--tap);
+    display: flex;
+    align-items: center;
+    padding: 0 14px;
+    font-size: 14px;
+  }
+  .tree-row  { height: var(--tap); font-size: 14px; }
+  .tab       {
+    min-height: var(--tap);
+    display: flex;
+    align-items: center;
+    padding: 0 14px;
+    font-size: 14px;
+  }
 
-  .conv-delete { opacity: 0.6; }
+  /* Always visible (no hover on touch) and large enough to hit reliably */
+  .conv-delete {
+    opacity: 0.6;
+    width: var(--tap);
+    height: var(--tap);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 18px;
+  }
+  .menu-btn,
+  .sidebar-close-btn,
+  .new-chat-btn,
+  .theme-toggle {
+    min-height: var(--tap);
+    min-width: var(--tap);
+  }
 }
 
 .sidebar-close-btn { display: none; }

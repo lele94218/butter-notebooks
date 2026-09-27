@@ -204,3 +204,19 @@
   /* Keep the output pane clear of the home indicator in standalone PWA */
   .code-output { padding-bottom: calc(10px + env(safe-area-inset-bottom)); }
 }
+
+@media (max-width: 600px) {
+  /* Apple HIG: 44pt touch targets */
+  .code-file-item { min-height: var(--tap); display: flex; align-items: center; }
+  .code-btn,
+  .code-up-btn,
+  .code-refresh-btn,
+  .code-collapse-btn {
+    min-height: var(--tap);
+    min-width: var(--tap);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .code-toolbar { gap: 8px; }
+}
