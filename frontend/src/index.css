@@ -107,6 +107,16 @@ body {
   overflow: hidden;
 }
 
+/* iOS 26 WebKit: in a standalone PWA with viewport-fit=cover +
+   black-translucent, 100dvh / 100svh / 100% all come up short by the top
+   safe-area inset (~59pt). Only 100lvh reports the true screen height, so the
+   installed app uses that and pays for the insets with padding instead. */
+@media (display-mode: standalone) {
+  :root { --app-vh: 100lvh; }
+  body { height: 100lvh; }
+  #root { height: 100lvh; }
+}
+
 ::-webkit-scrollbar { width: 4px; height: 4px; }
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: hsl(30 3.3% 20%); border-radius: 2px; }

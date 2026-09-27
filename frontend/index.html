@@ -10,9 +10,10 @@
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-title" content="butter" />
     <meta name="mobile-web-app-capable" content="yes" />
-    <!-- "default" keeps the app below the status bar. black-translucent makes
-         content slide under the clock/battery — don't use it here. -->
-    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+    <!-- Full-bleed standalone: black-translucent + viewport-fit=cover lets the
+         app paint behind the status bar. Every edge element must then pad for
+         env(safe-area-inset-*) (see .tab-bar / .input-area / drawers). -->
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <title>butter notebooks</title>
     <link rel="preconnect" href="https://assets-proxy.anthropic.com" crossorigin />
     <meta name="theme-color" content="#2f2e2b" />

@@ -1,6 +1,6 @@
 .app {
   display: flex;
-  height: calc(100dvh - var(--keyboard-offset, 0px));
+  height: calc(var(--app-vh, 100dvh) - var(--keyboard-offset, 0px));
   overflow: hidden;
   /* In a standalone PWA there is no browser chrome, so the safe-area strips
      at the top/bottom are painted by the app itself. Use the main content
