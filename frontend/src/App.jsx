@@ -9,6 +9,11 @@ import CodePanel from './components/CodePanel'
 import NotebookPanel from './components/NotebookPanel'
 import './App.css'
 
+// The Code tab (Monaco editor + python kernel) is hidden for now — it sees
+// little use. The panel and its backend routes are untouched; flip this to
+// true to bring the tab back.
+const SHOW_CODE_TAB = false
+
 export default function App() {
   const [authed, setAuthed] = useState(() => !!getToken())
   const [theme, setTheme] = useState(() => {
@@ -39,7 +44,12 @@ export default function App() {
 
   const [convId, setConvId] = useState(null)
   const [model, setModel] = useState(DEFAULT_MODEL)
-  const [tab, setTab] = useState(() => localStorage.getItem('butter_last_tab') || 'chat')
+  const [tab, setTab] = useState(() => {
+    const saved = localStorage.getItem('butter_last_tab') || 'chat'
+    // Don't restore into a tab that no longer has an entry point.
+    if (saved === 'code' && !SHOW_CODE_TAB) return 'chat'
+    return saved
+  })
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
 
@@ -193,7 +203,9 @@ export default function App() {
           <button className="menu-btn" onClick={() => setSidebarOpen(o => !o)}>{'☰'}</button>
           <div className={`tab ${tab === 'chat' ? 'active' : ''}`} onClick={() => { setTab('chat'); localStorage.setItem('butter_last_tab', 'chat') }}>Chat</div>
           <div className={`tab ${tab === 'notes' ? 'active' : ''}`} onClick={() => { setTab('notes'); localStorage.setItem('butter_last_tab', 'notes') }}>Notes</div>
-          <div className={`tab ${tab === 'code' ? 'active' : ''}`} onClick={() => { setTab('code'); localStorage.setItem('butter_last_tab', 'code') }}>Code</div>
+          {SHOW_CODE_TAB && (
+            <div className={`tab ${tab === 'code' ? 'active' : ''}`} onClick={() => { setTab('code'); localStorage.setItem('butter_last_tab', 'code') }}>Code</div>
+          )}
           <div className={`tab ${tab === 'notebook' ? 'active' : ''}`} onClick={() => { setTab('notebook'); localStorage.setItem('butter_last_tab', 'notebook') }}>Jupyter</div>
         </div>
 
