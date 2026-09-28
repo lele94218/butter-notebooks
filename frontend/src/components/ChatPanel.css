@@ -322,7 +322,7 @@
 
 .input-area {
   border-top: 1px solid var(--border);
-  padding: var(--input-padding-y) var(--msg-padding-x) calc(var(--input-padding-y) + 4px + env(safe-area-inset-bottom));
+  padding: var(--input-padding-y) var(--msg-padding-x) calc(var(--input-padding-y) + 4px + var(--sa-bottom, env(safe-area-inset-bottom)));
   /* Fill the home-indicator strip with the input area's own surface so it
      reads as part of the composer instead of dead space below it. */
   background: var(--bg);
@@ -509,10 +509,11 @@ textarea::placeholder { color: var(--text2); }
   padding: 5px 24px;
   font-size: 11px;
   color: var(--text2);
-  border-top: 1px solid var(--border);
+  /* Sits directly above the composer, so no top border (the composer has one) */
   min-height: 24px;
   display: flex;
   align-items: center;
+  flex-shrink: 0;
 }
 
 @media (max-width: 600px) {

@@ -526,6 +526,11 @@ export default function ChatPanel({ convId, initialSessionId, initialMessages, o
         )}
       </div>
 
+      {/* Above the composer: below it the bar would be pushed into the
+          home-indicator area. Only rendered when there's something to show —
+          an always-present empty bar left a 24px strip under the input. */}
+      {status ? <div className="status-bar">{status}</div> : null}
+
       <div className="input-area">
         <div className="input-inner">
           {attachments.length > 0 && (
@@ -589,7 +594,6 @@ export default function ChatPanel({ convId, initialSessionId, initialMessages, o
         </div>
       </div>
 
-      <div className="status-bar">{status}</div>
     </div>
   )
 }

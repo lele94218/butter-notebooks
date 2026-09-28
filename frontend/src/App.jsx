@@ -31,15 +31,42 @@ export default function App() {
   })
 
   useEffect(() => {
+    // Measure the real safe-area insets and expose them as --sa-* variables.
+    // env(safe-area-inset-*) resolves to 0 inside position:fixed subtrees on
+    // iOS (body is fixed here), which left the sidebar footer under the home
+    // indicator. Reading it once from a probe on <html> gives a value every
+    // rule can use, fixed or not.
+    const probe = document.createElement('div')
+    probe.style.cssText =
+      'position:fixed;visibility:hidden;pointer-events:none;top:0;left:0;' +
+      'padding-top:env(safe-area-inset-top);padding-bottom:env(safe-area-inset-bottom);'
+    document.documentElement.appendChild(probe)
+    const readInsets = () => {
+      const cs = getComputedStyle(probe)
+      const root = document.documentElement.style
+      root.setProperty('--sa-top', cs.paddingTop || '0px')
+      root.setProperty('--sa-bottom', cs.paddingBottom || '0px')
+    }
+    readInsets()
+    window.addEventListener('orientationchange', readInsets)
+
     const vv = window.visualViewport
-    if (!vv) return
+    if (!vv) return () => {
+      window.removeEventListener('orientationchange', readInsets)
+      probe.remove()
+    }
     const update = () => {
       const offset = Math.max(0, window.innerHeight - vv.height - vv.offsetTop)
       document.documentElement.style.setProperty('--keyboard-offset', `${offset}px`)
     }
     vv.addEventListener('resize', update)
     vv.addEventListener('scroll', update)
-    return () => { vv.removeEventListener('resize', update); vv.removeEventListener('scroll', update) }
+    return () => {
+      vv.removeEventListener('resize', update)
+      vv.removeEventListener('scroll', update)
+      window.removeEventListener('orientationchange', readInsets)
+      probe.remove()
+    }
   }, [])
 
   const [convId, setConvId] = useState(null)
