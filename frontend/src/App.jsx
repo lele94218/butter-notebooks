@@ -31,30 +31,59 @@ export default function App() {
   })
 
   useEffect(() => {
-    // Measure the real safe-area insets and expose them as --sa-* variables.
-    // env(safe-area-inset-*) resolves to 0 inside position:fixed subtrees on
-    // iOS (body is fixed here), which left the sidebar footer under the home
-    // indicator. Reading it once from a probe on <html> gives a value every
-    // rule can use, fixed or not.
+    // Publish the safe-area insets as --sa-top / --sa-bottom.
+    //
+    // env(safe-area-inset-*) can't be trusted here: WebKit reports 0 inside a
+    // position:fixed subtree (body is fixed), and an early navigation can leave
+    // the insets stuck at 0 for the document's lifetime. So read env() when it
+    // gives something, and otherwise fall back to a known-good constant for the
+    // device — a home-indicator iPhone in standalone always reserves 34pt at the
+    // bottom, and screen vs. window height tells us the top band.
     const probe = document.createElement('div')
     probe.style.cssText =
-      'position:fixed;visibility:hidden;pointer-events:none;top:0;left:0;' +
+      'position:absolute;visibility:hidden;pointer-events:none;top:0;left:0;' +
       'padding-top:env(safe-area-inset-top);padding-bottom:env(safe-area-inset-bottom);'
     document.documentElement.appendChild(probe)
+
     const readInsets = () => {
       const cs = getComputedStyle(probe)
+      let top = parseFloat(cs.paddingTop) || 0
+      let bottom = parseFloat(cs.paddingBottom) || 0
+
+      const standalone =
+        window.matchMedia('(display-mode: standalone)').matches ||
+        window.navigator.standalone === true
+      if (standalone) {
+        // Home-indicator devices (no physical home button) always reserve the
+        // bottom gesture strip; screen.height > 0 && no notch => 0.
+        const hasHomeIndicator =
+          window.screen && window.screen.height >= 780 && window.devicePixelRatio >= 2
+        if (!bottom && hasHomeIndicator) bottom = 34
+        if (!top && hasHomeIndicator) {
+          // Status-bar band: whatever the screen has that the window doesn't,
+          // minus the bottom strip we just accounted for.
+          const diff = Math.round((window.screen.height || 0) - window.innerHeight - bottom)
+          top = diff > 0 && diff < 80 ? diff : 59
+        }
+      }
       const root = document.documentElement.style
-      root.setProperty('--sa-top', cs.paddingTop || '0px')
-      root.setProperty('--sa-bottom', cs.paddingBottom || '0px')
+      root.setProperty('--sa-top', `${top}px`)
+      root.setProperty('--sa-bottom', `${bottom}px`)
     }
     readInsets()
+    // Insets can arrive late; re-read after the first frames settle.
+    const t1 = setTimeout(readInsets, 300)
+    const t2 = setTimeout(readInsets, 1200)
     window.addEventListener('orientationchange', readInsets)
 
-    const vv = window.visualViewport
-    if (!vv) return () => {
+    const cleanupInsets = () => {
+      clearTimeout(t1); clearTimeout(t2)
       window.removeEventListener('orientationchange', readInsets)
       probe.remove()
     }
+
+    const vv = window.visualViewport
+    if (!vv) return cleanupInsets
     const update = () => {
       const offset = Math.max(0, window.innerHeight - vv.height - vv.offsetTop)
       document.documentElement.style.setProperty('--keyboard-offset', `${offset}px`)
@@ -64,8 +93,7 @@ export default function App() {
     return () => {
       vv.removeEventListener('resize', update)
       vv.removeEventListener('scroll', update)
-      window.removeEventListener('orientationchange', readInsets)
-      probe.remove()
+      cleanupInsets()
     }
   }, [])
 

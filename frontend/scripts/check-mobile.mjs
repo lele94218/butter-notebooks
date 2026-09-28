@@ -26,17 +26,16 @@ const ctx = await browser.newContext({
 })
 const page = await ctx.newPage()
 
-// Chromium can't emulate env(safe-area-inset-*), so inject the values iOS
-// reports and force display-mode:standalone to match the installed app.
-await page.addInitScript(
-  ([top, bottom, token]) => {
-    localStorage.setItem('butter_auth_token', token)
-    const s = document.createElement('style')
-    s.textContent = `:root{--sa-top:${top}px;--sa-bottom:${bottom}px}`
-    document.documentElement.appendChild(s)
-  },
-  [INSET_TOP, INSET_BOTTOM, TOKEN]
-)
+// Only seed auth. Crucially we do NOT inject --sa-*: Chromium reports
+// env(safe-area-inset-*) as 0, matching what WebKit does inside the installed
+// app's fixed body, so the app's own runtime inference is what gets tested.
+await page.addInitScript((token) => {
+  localStorage.setItem('butter_auth_token', token)
+  // Look like an iPhone so the app's standalone inference kicks in.
+  Object.defineProperty(window.navigator, 'standalone', { value: true, configurable: true })
+  Object.defineProperty(window.screen, 'height', { value: 852, configurable: true })
+}, TOKEN)
+
 await page.emulateMedia({ media: 'screen' })
 await page.addInitScript(() => {
   const mm = window.matchMedia.bind(window)
@@ -46,18 +45,27 @@ await page.addInitScript(() => {
       : mm(q)
 })
 
+const report = []
+const check = (name, ok, detail) => report.push({ name, ok, detail })
+
 await page.goto(URL, { waitUntil: 'networkidle' })
-// Chromium reports env(safe-area-inset-*) as 0. The app reads the real insets
-// at runtime into --sa-top / --sa-bottom, so set those to the iPhone values —
-// this measures the site's own CSS the way iOS evaluates it.
-await page.evaluate(
-  ([top, bottom]) => {
-    document.documentElement.style.setProperty('--sa-top', `${top}px`)
-    document.documentElement.style.setProperty('--sa-bottom', `${bottom}px`)
-  },
-  [INSET_TOP, INSET_BOTTOM]
+// Nothing is injected here on purpose. Chromium reports env(safe-area-inset-*)
+// as 0 — which is exactly what WebKit does inside the fixed body of the
+// installed app — so this exercises the app's own runtime inference of
+// --sa-top / --sa-bottom. Give it time to settle (it re-reads at 300/1200ms).
+await page.waitForTimeout(1600)
+const insets = await page.evaluate(() => {
+  const cs = getComputedStyle(document.documentElement)
+  return {
+    top: cs.getPropertyValue('--sa-top').trim(),
+    bottom: cs.getPropertyValue('--sa-bottom').trim(),
+  }
+})
+check(
+  'safe-area insets resolved',
+  parseFloat(insets.bottom) >= INSET_BOTTOM,
+  `--sa-top=${insets.top} --sa-bottom=${insets.bottom} (need bottom >= ${INSET_BOTTOM}px)`
 )
-await page.waitForTimeout(600)
 
 const box = async (sel) =>
   page.evaluate((s) => {
@@ -66,9 +74,6 @@ const box = async (sel) =>
     const r = el.getBoundingClientRect()
     return { top: Math.round(r.top), bottom: Math.round(r.bottom), h: Math.round(r.height) }
   }, sel)
-
-const report = []
-const check = (name, ok, detail) => report.push({ name, ok, detail })
 
 // --- chat view ---
 const inputArea = await box('.input-area')
