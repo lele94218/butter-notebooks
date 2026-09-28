@@ -219,11 +219,15 @@
 }
 
 .sidebar-footer {
-  padding: 10px 12px;
+  /* Pays for the home-indicator inset itself. Relying on the drawer's
+     padding-bottom wasn't enough in a full-bleed PWA — the row ended up
+     clipped by the gesture area. flex-shrink:0 keeps it from being squeezed. */
+  padding: 10px 12px calc(10px + env(safe-area-inset-bottom));
   border-top: 1px solid var(--border);
   display: flex;
   gap: 8px;
   align-items: center;
+  flex-shrink: 0;
 }
 
 .new-chat-btn {
@@ -512,8 +516,9 @@
        body is position:fixed, so the drawer resolved against that box, which
        iOS under-reports in full-bleed standalone mode. */
     height: var(--app-vh, 100dvh);
+    /* Only the top inset here — the footer pays for the bottom one itself,
+       so the scrollable list can still run to the edge of the screen. */
     padding-top: env(safe-area-inset-top);
-    padding-bottom: env(safe-area-inset-bottom);
     z-index: 200;
     transform: translateX(-100%);
     transition: transform 0.22s ease;
