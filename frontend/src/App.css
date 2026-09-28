@@ -517,6 +517,9 @@
        for breathing room. */
     height: calc(var(--app-vh, 100dvh) - var(--sa-bottom, env(safe-area-inset-bottom)));
     padding-top: var(--sa-top, env(safe-area-inset-top));
+    /* Belt and braces: if --sa-bottom somehow resolves to 0 in the installed
+       app, max() still keeps the drawer clear of the 34pt gesture strip. */
+    max-height: calc(var(--app-vh, 100dvh) - 34px);
     z-index: 200;
     transform: translateX(-100%);
     transition: transform 0.22s ease;

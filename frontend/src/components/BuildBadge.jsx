@@ -19,6 +19,11 @@ export default function BuildBadge() {
         screenH: window.screen?.height,
         innerH: window.innerHeight,
         dpr: window.devicePixelRatio,
+        // Rendered height of the drawer — if this exceeds the usable area the
+        // footer gets clipped by overflow:hidden.
+        sidebarH: Math.round(
+          document.querySelector('.sidebar')?.getBoundingClientRect().height || 0
+        ),
       })
     }
     read()
@@ -31,11 +36,15 @@ export default function BuildBadge() {
     <button className="build-badge" onClick={() => setOpen(o => !o)} title="Build info">
       {open ? (
         <span className="build-badge-detail">
-          {__BUILD_ID__} · sa {info.bottom}/{info.top} ·{' '}
-          {info.standalone ? 'app' : 'web'} · {info.screenH}/{info.innerH}@{info.dpr}x
+          {__BUILD_ID__} · {info.standalone ? 'app' : 'web'} ·{' '}
+          scr{info.screenH}/in{info.innerH}@{info.dpr}x · h{info.sidebarH}
         </span>
       ) : (
-        <span>{__BUILD_ID__}</span>
+        // Insets are shown by default: they're the thing that keeps going
+        // wrong, and having to tap to see them slowed every diagnosis down.
+        <span>
+          {__BUILD_ID__} · sa↓{info.bottom} ↑{info.top}
+        </span>
       )}
     </button>
   )
