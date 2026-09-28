@@ -108,14 +108,12 @@ const sidebar = await box('.sidebar')
 const footer = await box('.sidebar-footer')
 const newChat = await box('.new-chat-btn')
 if (sidebar) {
-  // Should start at the very top and stop at the edge of the usable area —
-  // running to VH would push its footer under the home indicator, and
-  // overflow:hidden would then clip the buttons.
-  const usableBottom = VH - INSET_BOTTOM
+  // The drawer fills the viewport; keeping its contents out of the gesture
+  // strip is the footer's job (asserted below), so only anchor it at the top.
   check(
-    'drawer covers the usable area exactly',
-    sidebar.top === 0 && Math.abs(sidebar.bottom - usableBottom) <= 2,
-    `top=${sidebar.top} bottom=${sidebar.bottom} (expected ~${usableBottom}, screen ${VH})`
+    'drawer starts at the top edge',
+    sidebar.top === 0,
+    `top=${sidebar.top} bottom=${sidebar.bottom} (screen ${VH})`
   )
 }
 if (footer && newChat) {
@@ -123,6 +121,23 @@ if (footer && newChat) {
   check('New chat button clear of home indicator', btnGap >= INSET_BOTTOM,
     `New chat bottom is ${btnGap}px from screen bottom (need >= ${INSET_BOTTOM})`)
   check('footer not clipped', footer.bottom <= VH, `footer bottom=${footer.bottom} screen=${VH}`)
+}
+
+// Real iPhones report 100lvh ~25pt short of the screen in standalone, which
+// previously let overflow:hidden shave the footer. Shrink the drawer to that
+// height and confirm the buttons survive.
+await page.evaluate(() => {
+  document.documentElement.style.setProperty('--app-vh', '827px')
+})
+await page.waitForTimeout(300)
+const shrunkBtn = await box('.new-chat-btn')
+const shrunkSidebar = await box('.sidebar')
+if (shrunkBtn && shrunkSidebar) {
+  check(
+    'footer survives an under-reported 100lvh',
+    shrunkBtn.bottom <= shrunkSidebar.bottom && shrunkBtn.h >= 40,
+    `button bottom=${shrunkBtn.bottom} h=${shrunkBtn.h}, drawer bottom=${shrunkSidebar.bottom}`
+  )
 }
 
 let failed = 0

@@ -219,9 +219,13 @@
 }
 
 .sidebar-footer {
-  /* The drawer already stops above the home indicator, so plain padding here.
-     flex-shrink:0 keeps the row from being squeezed. */
-  padding: 10px 12px;
+  /* Owns the bottom inset. Uses min-height + padding (not just padding) so the
+     row keeps its full size even when the flex parent is shorter than expected —
+     100lvh under-reports on a real iPhone, which previously let overflow:hidden
+     shave the buttons. */
+  padding: 10px 12px calc(10px + var(--sa-bottom, env(safe-area-inset-bottom)));
+  min-height: calc(44px + 20px + var(--sa-bottom, env(safe-area-inset-bottom)));
+  box-sizing: border-box;
   border-top: 1px solid var(--border);
   display: flex;
   gap: 8px;
@@ -515,11 +519,12 @@
        far past the usable area and `overflow:hidden` would clip the footer, so
        subtract the bottom inset here and let the footer keep its own padding
        for breathing room. */
-    height: calc(var(--app-vh, 100dvh) - var(--sa-bottom, env(safe-area-inset-bottom)));
+    /* Fill the viewport and let the footer's padding do the avoiding.
+       Subtracting the inset here double-counts: on a real iPhone 100lvh is
+       already ~25pt short of the screen, so height:calc(100lvh - 34px) made the
+       drawer too short and overflow:hidden clipped the footer buttons. */
+    height: var(--app-vh, 100dvh);
     padding-top: var(--sa-top, env(safe-area-inset-top));
-    /* Belt and braces: if --sa-bottom somehow resolves to 0 in the installed
-       app, max() still keeps the drawer clear of the 34pt gesture strip. */
-    max-height: calc(var(--app-vh, 100dvh) - 34px);
     z-index: 200;
     transform: translateX(-100%);
     transition: transform 0.22s ease;
@@ -534,8 +539,7 @@
     top: 0;
     left: 0;
     width: 100%;
-    /* Matches .sidebar so the overlay covers exactly the usable area. */
-    height: calc(var(--app-vh, 100dvh) - var(--sa-bottom, env(safe-area-inset-bottom)));
+    height: var(--app-vh, 100dvh);
     z-index: 199;
     background: rgba(0,0,0,0.5);
   }
