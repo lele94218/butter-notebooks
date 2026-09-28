@@ -222,7 +222,7 @@
   /* Pays for the home-indicator inset itself. Relying on the drawer's
      padding-bottom wasn't enough in a full-bleed PWA — the row ended up
      clipped by the gesture area. flex-shrink:0 keeps it from being squeezed. */
-  padding: 10px 12px;
+  padding: 10px 12px calc(10px + var(--sa-bottom, env(safe-area-inset-bottom)));
   border-top: 1px solid var(--border);
   display: flex;
   gap: 8px;
@@ -599,11 +599,11 @@
 
 .sidebar-close-btn { display: none; }
 
-/* Build stamp in the sidebar footer — tap to expand diagnostics */
+/* Build stamp in the sidebar header (top-left) — tap to expand diagnostics */
 .build-badge {
-  flex-shrink: 0;
-  align-self: stretch;
-  padding: 3px 12px calc(3px + var(--sa-bottom, env(safe-area-inset-bottom)));
+  display: block;
+  margin: -4px 0 6px;
+  padding: 0;
   background: none;
   border: none;
   color: var(--text3);
@@ -612,9 +612,11 @@
   line-height: 1.3;
   text-align: left;
   cursor: pointer;
-  opacity: 0.5;
+  opacity: 0.55;
+  max-width: 100%;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.build-badge:hover { opacity: 0.9; }
+.build-badge:hover { opacity: 0.95; }
+.sidebar--collapsed .build-badge { display: none; }

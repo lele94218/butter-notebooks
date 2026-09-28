@@ -214,6 +214,9 @@ export default function App() {
       <div className={`sidebar ${sidebarOpen ? 'sidebar--open' : ''} ${sidebarCollapsed ? 'sidebar--collapsed' : ''}`}>
         <div className="sidebar-header">
           <span>butter notebooks</span>
+          {/* Top-left: always visible, unlike the bottom edge which the home
+              indicator can clip — which is exactly what it's here to diagnose. */}
+          <BuildBadge />
           <button className="sidebar-collapse-btn" onClick={() => setSidebarCollapsed(c => !c)} title={sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}>{sidebarCollapsed ? '»' : '«'}</button>
           <button className="sidebar-close-btn" onClick={() => setSidebarOpen(false)}>{'✕'}</button>
         </div>
@@ -248,9 +251,6 @@ export default function App() {
           </button>
           <button className="theme-toggle" onClick={logout} title="Log out">{'⏏'}</button>
         </div>
-        {/* Sits right where the clipping happens, so it doubles as a marker
-            for whether the bottom inset is being honoured. */}
-        <BuildBadge />
       </div>
 
       <div className="main">
