@@ -3,7 +3,14 @@ import react from '@vitejs/plugin-react'
 import { VitePWA } from 'vite-plugin-pwa'
 
 // https://vite.dev/config/
+// Build stamp shown in the app's corner, so it's obvious at a glance whether a
+// device is running the latest deploy (service workers can serve a stale shell).
+const BUILD_ID = new Date().toISOString().slice(5, 16).replace('T', ' ')
+
 export default defineConfig({
+  define: {
+    __BUILD_ID__: JSON.stringify(BUILD_ID),
+  },
   plugins: [
     react(),
     VitePWA({

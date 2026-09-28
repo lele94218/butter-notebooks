@@ -7,6 +7,7 @@ import ChatPanel from './components/ChatPanel'
 import NotesPanel from './components/NotesPanel'
 import CodePanel from './components/CodePanel'
 import NotebookPanel from './components/NotebookPanel'
+import BuildBadge from './components/BuildBadge'
 import './App.css'
 
 // The Code tab (Monaco editor + python kernel) is hidden for now — it sees
@@ -247,6 +248,9 @@ export default function App() {
           </button>
           <button className="theme-toggle" onClick={logout} title="Log out">{'⏏'}</button>
         </div>
+        {/* Sits right where the clipping happens, so it doubles as a marker
+            for whether the bottom inset is being honoured. */}
+        <BuildBadge />
       </div>
 
       <div className="main">
