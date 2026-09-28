@@ -108,8 +108,15 @@ const sidebar = await box('.sidebar')
 const footer = await box('.sidebar-footer')
 const newChat = await box('.new-chat-btn')
 if (sidebar) {
-  check('drawer spans full height', sidebar.top === 0 && sidebar.bottom === VH,
-    `top=${sidebar.top} bottom=${sidebar.bottom} (screen ${VH})`)
+  // Should start at the very top and stop at the edge of the usable area —
+  // running to VH would push its footer under the home indicator, and
+  // overflow:hidden would then clip the buttons.
+  const usableBottom = VH - INSET_BOTTOM
+  check(
+    'drawer covers the usable area exactly',
+    sidebar.top === 0 && Math.abs(sidebar.bottom - usableBottom) <= 2,
+    `top=${sidebar.top} bottom=${sidebar.bottom} (expected ~${usableBottom}, screen ${VH})`
+  )
 }
 if (footer && newChat) {
   const btnGap = VH - newChat.bottom

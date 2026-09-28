@@ -219,10 +219,9 @@
 }
 
 .sidebar-footer {
-  /* Pays for the home-indicator inset itself. Relying on the drawer's
-     padding-bottom wasn't enough in a full-bleed PWA — the row ended up
-     clipped by the gesture area. flex-shrink:0 keeps it from being squeezed. */
-  padding: 10px 12px calc(10px + var(--sa-bottom, env(safe-area-inset-bottom)));
+  /* The drawer already stops above the home indicator, so plain padding here.
+     flex-shrink:0 keeps the row from being squeezed. */
+  padding: 10px 12px;
   border-top: 1px solid var(--border);
   display: flex;
   gap: 8px;
@@ -511,13 +510,12 @@
     position: fixed;
     left: 0;
     top: 0;
-    /* Height comes from the same token as .app (100lvh in a standalone PWA,
-       100dvh in the browser). Relying on bottom:0 left the drawer short:
-       body is position:fixed, so the drawer resolved against that box, which
-       iOS under-reports in full-bleed standalone mode. */
-    height: var(--app-vh, 100dvh);
-    /* Only the top inset here — the footer pays for the bottom one itself,
-       so the scrollable list can still run to the edge of the screen. */
+    /* --app-vh is 100lvh in standalone, i.e. the whole screen including the
+       home-indicator strip. Starting at top:0 means the drawer would run that
+       far past the usable area and `overflow:hidden` would clip the footer, so
+       subtract the bottom inset here and let the footer keep its own padding
+       for breathing room. */
+    height: calc(var(--app-vh, 100dvh) - var(--sa-bottom, env(safe-area-inset-bottom)));
     padding-top: var(--sa-top, env(safe-area-inset-top));
     z-index: 200;
     transform: translateX(-100%);
@@ -533,8 +531,8 @@
     top: 0;
     left: 0;
     width: 100%;
-    /* Same reason as .sidebar — inset:0 left a gap at the bottom. */
-    height: var(--app-vh, 100dvh);
+    /* Matches .sidebar so the overlay covers exactly the usable area. */
+    height: calc(var(--app-vh, 100dvh) - var(--sa-bottom, env(safe-area-inset-bottom)));
     z-index: 199;
     background: rgba(0,0,0,0.5);
   }
