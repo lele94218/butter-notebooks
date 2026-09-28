@@ -506,12 +506,12 @@
   .sidebar {
     position: fixed;
     left: 0;
-    /* Pin to both edges instead of setting a height: -webkit-fill-available
-       under-reports in a standalone PWA (no browser chrome), which left the
-       drawer short of the bottom of the screen. */
     top: 0;
-    bottom: 0;
-    height: auto;
+    /* Height comes from the same token as .app (100lvh in a standalone PWA,
+       100dvh in the browser). Relying on bottom:0 left the drawer short:
+       body is position:fixed, so the drawer resolved against that box, which
+       iOS under-reports in full-bleed standalone mode. */
+    height: var(--app-vh, 100dvh);
     padding-top: env(safe-area-inset-top);
     padding-bottom: env(safe-area-inset-bottom);
     z-index: 200;
@@ -525,7 +525,11 @@
 
   .sidebar-backdrop {
     position: fixed;
-    inset: 0;
+    top: 0;
+    left: 0;
+    width: 100%;
+    /* Same reason as .sidebar — inset:0 left a gap at the bottom. */
+    height: var(--app-vh, 100dvh);
     z-index: 199;
     background: rgba(0,0,0,0.5);
   }
