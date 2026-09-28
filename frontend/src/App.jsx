@@ -53,18 +53,14 @@ export default function App() {
       const standalone =
         window.matchMedia('(display-mode: standalone)').matches ||
         window.navigator.standalone === true
+      // When env() gives nothing in the installed app, assume the insets a
+      // modern iPhone reserves. Deliberately unconditional: device sniffing
+      // (screen height / DPR) was unreliable, and over-reserving on a device
+      // without a home indicator costs a little padding, while under-reserving
+      // puts buttons under the system gesture area.
       if (standalone) {
-        // Home-indicator devices (no physical home button) always reserve the
-        // bottom gesture strip; screen.height > 0 && no notch => 0.
-        const hasHomeIndicator =
-          window.screen && window.screen.height >= 780 && window.devicePixelRatio >= 2
-        if (!bottom && hasHomeIndicator) bottom = 34
-        if (!top && hasHomeIndicator) {
-          // Status-bar band: whatever the screen has that the window doesn't,
-          // minus the bottom strip we just accounted for.
-          const diff = Math.round((window.screen.height || 0) - window.innerHeight - bottom)
-          top = diff > 0 && diff < 80 ? diff : 59
-        }
+        if (!bottom) bottom = 34
+        if (!top) top = 59
       }
       const root = document.documentElement.style
       root.setProperty('--sa-top', `${top}px`)
