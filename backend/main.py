@@ -1438,12 +1438,38 @@ def _oa_extract_text(content) -> str:
     return str(content or "")
 
 
-def _oa_messages_to_prompt(messages: list[dict]) -> str:
+def _oa_messages_to_prompt(messages: list[dict], image_slots: Optional[dict] = None) -> str:
+    """Flatten an OpenAI message array into one prompt for the CLI.
+
+    The CLI takes a single user turn plus one flat set of attachments, so the
+    per-message association that the OpenAI schema expresses (an image belongs
+    to the message it was sent in) is preserved in the text instead: each image
+    is referenced inline as [image N] at the position it occupied. `image_slots`
+    maps id(message part) -> N, built by _oa_extract_images so both views agree
+    on the numbering.
+    """
+    slots = image_slots or {}
+
+    def render(content) -> str:
+        if isinstance(content, str):
+            return content
+        if not isinstance(content, list):
+            return str(content or "")
+        out: list[str] = []
+        for part in content:
+            if not isinstance(part, dict):
+                continue
+            if part.get("type") == "text":
+                out.append(part.get("text", ""))
+            elif id(part) in slots:
+                out.append(f"[image {slots[id(part)]}]")
+        return " ".join(x for x in out if x)
+
     system_parts: list[str] = []
     convo: list[tuple[str, str]] = []
     for m in messages or []:
         role = m.get("role")
-        text = _oa_extract_text(m.get("content")).strip()
+        text = render(m.get("content")).strip()
         if not text:
             continue
         if role == "system":
@@ -1468,7 +1494,7 @@ _OA_MIME_EXT = {
 }
 
 
-def _oa_extract_images(messages: list[dict]) -> list[dict]:
+def _oa_extract_images(messages: list[dict]) -> tuple[list[dict], dict]:
     """Pull image_url parts from EVERY user message (OpenAI vision format), save
     them under UPLOADS_DIR, and return [{path, mime}] for run_agent_stream.
 
@@ -1490,7 +1516,8 @@ def _oa_extract_images(messages: list[dict]) -> list[dict]:
             parts_all.extend(x for x in c if isinstance(x, dict))
 
     out: list[dict] = []
-    seen: set[str] = set()
+    seen: dict[str, int] = {}
+    slots: dict[int, int] = {}   # id(part) -> image number used in the prompt
     for part in parts_all:
         if not isinstance(part, dict):
             continue
@@ -1522,8 +1549,10 @@ def _oa_extract_images(messages: list[dict]) -> list[dict]:
             continue
         digest = hashlib.sha256(data).hexdigest()
         if digest in seen:
+            # Same picture resent on a later turn: reuse its number so the
+            # prompt keeps referring to one image, not several.
+            slots[id(part)] = seen[digest]
             continue
-        seen.add(digest)
         ext = _OA_MIME_EXT.get(mime, ".png")
         # Name by content hash: the same picture arrives again on every turn,
         # so this reuses the file instead of filling uploads/ with copies.
@@ -1534,7 +1563,9 @@ def _oa_extract_images(messages: list[dict]) -> list[dict]:
             except Exception:
                 continue
         out.append({"path": str(p), "mime": mime})
-    return out
+        seen[digest] = len(out)
+        slots[id(part)] = len(out)
+    return out, slots
 
 
 def _oa_chunk(cid: str, created: int, model: str, delta: dict, finish=None) -> str:
@@ -1672,10 +1703,12 @@ async def openai_chat_completions(request: Request, req: OAChatRequest, authoriz
     if not req.messages:
         raise HTTPException(status_code=400, detail="messages is required")
     import time as _time
-    prompt = _oa_messages_to_prompt(req.messages)
+    # Extract first: the prompt references each image by the number assigned here.
+    image_list, image_slots = _oa_extract_images(req.messages)
+    images = image_list or None
+    prompt = _oa_messages_to_prompt(req.messages, image_slots)
     mdl = req.model or CLAUDE_DEFAULT_MODEL          # public name echoed to the client
     internal_model = _shim_resolve_model(req.model)  # actual backend id (codex/claude)
-    images = _oa_extract_images(req.messages) or None  # attachments from the client
     cid = "chatcmpl-" + uuid.uuid4().hex
     created = int(_time.time())
 
