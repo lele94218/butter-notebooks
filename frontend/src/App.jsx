@@ -84,7 +84,19 @@ export default function App() {
     const update = () => {
       const offset = Math.max(0, window.innerHeight - vv.height - vv.offsetTop)
       document.documentElement.style.setProperty('--keyboard-offset', `${offset}px`)
+      // Authoritative usable height. 100lvh includes the status-bar band that
+      // the installed app can't actually draw into, so layouts sized from it
+      // overflow the screen by that amount and the bottom row gets clipped.
+      // visualViewport reports what's really visible. Ignore it while the
+      // keyboard is up (offset > 0) so the app doesn't collapse.
+      if (offset === 0 && vv.height > 200) {
+        document.documentElement.style.setProperty('--app-vh', `${Math.round(vv.height)}px`)
+      }
+      // Expose the raw numbers so the on-screen badge can report what the
+      // device actually thinks the viewport is.
+      window.__vvH = Math.round(vv.height)
     }
+    update()
     vv.addEventListener('resize', update)
     vv.addEventListener('scroll', update)
     return () => {

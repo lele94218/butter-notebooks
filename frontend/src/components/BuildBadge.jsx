@@ -24,6 +24,15 @@ export default function BuildBadge() {
         sidebarH: Math.round(
           document.querySelector('.sidebar')?.getBoundingClientRect().height || 0
         ),
+        vvH: window.__vvH ?? Math.round(window.visualViewport?.height || 0),
+        lvh: (() => {
+          const d = document.createElement('div')
+          d.style.cssText = 'position:absolute;top:0;height:100lvh;visibility:hidden'
+          document.body.appendChild(d)
+          const v = Math.round(d.getBoundingClientRect().height)
+          d.remove()
+          return v
+        })(),
       })
     }
     read()
@@ -43,7 +52,7 @@ export default function BuildBadge() {
         // Insets are shown by default: they're the thing that keeps going
         // wrong, and having to tap to see them slowed every diagnosis down.
         <span>
-          {__BUILD_ID__} · sa↓{info.bottom} ↑{info.top}
+          {__BUILD_ID__} · sa↓{info.bottom} ↑{info.top} · vv{info.vvH} lvh{info.lvh}
         </span>
       )}
     </button>
