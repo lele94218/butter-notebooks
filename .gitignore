@@ -29,3 +29,6 @@ data/
 
 # built frontend config (real host)
 frontend/.env.production
+
+# iOS simulator probe build artifacts
+frontend/.ios-probe/BWK.app/BWK
