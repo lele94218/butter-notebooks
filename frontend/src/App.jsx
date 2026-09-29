@@ -7,7 +7,6 @@ import ChatPanel from './components/ChatPanel'
 import NotesPanel from './components/NotesPanel'
 import CodePanel from './components/CodePanel'
 import NotebookPanel from './components/NotebookPanel'
-import BuildBadge from './components/BuildBadge'
 import './App.css'
 
 // The Code tab (Monaco editor + python kernel) is hidden for now — it sees
@@ -32,78 +31,15 @@ export default function App() {
   })
 
   useEffect(() => {
-    // Publish the safe-area insets as --sa-top / --sa-bottom.
-    //
-    // env(safe-area-inset-*) can't be trusted here: WebKit reports 0 inside a
-    // position:fixed subtree (body is fixed), and an early navigation can leave
-    // the insets stuck at 0 for the document's lifetime. So read env() when it
-    // gives something, and otherwise fall back to a known-good constant for the
-    // device — a home-indicator iPhone in standalone always reserves 34pt at the
-    // bottom, and screen vs. window height tells us the top band.
-    const probe = document.createElement('div')
-    probe.style.cssText =
-      'position:absolute;visibility:hidden;pointer-events:none;top:0;left:0;' +
-      'padding-top:env(safe-area-inset-top);padding-bottom:env(safe-area-inset-bottom);'
-    document.documentElement.appendChild(probe)
-
-    const readInsets = () => {
-      const cs = getComputedStyle(probe)
-      let top = parseFloat(cs.paddingTop) || 0
-      let bottom = parseFloat(cs.paddingBottom) || 0
-
-      const standalone =
-        window.matchMedia('(display-mode: standalone)').matches ||
-        window.navigator.standalone === true
-      // When env() gives nothing in the installed app, assume the insets a
-      // modern iPhone reserves. Deliberately unconditional: device sniffing
-      // (screen height / DPR) was unreliable, and over-reserving on a device
-      // without a home indicator costs a little padding, while under-reserving
-      // puts buttons under the system gesture area.
-      if (standalone) {
-        if (!bottom) bottom = 34
-        if (!top) top = 59
-      }
-      const root = document.documentElement.style
-      root.setProperty('--sa-top', `${top}px`)
-      root.setProperty('--sa-bottom', `${bottom}px`)
-    }
-    readInsets()
-    // Insets can arrive late; re-read after the first frames settle.
-    const t1 = setTimeout(readInsets, 300)
-    const t2 = setTimeout(readInsets, 1200)
-    window.addEventListener('orientationchange', readInsets)
-
-    const cleanupInsets = () => {
-      clearTimeout(t1); clearTimeout(t2)
-      window.removeEventListener('orientationchange', readInsets)
-      probe.remove()
-    }
-
     const vv = window.visualViewport
-    if (!vv) return cleanupInsets
+    if (!vv) return
     const update = () => {
       const offset = Math.max(0, window.innerHeight - vv.height - vv.offsetTop)
       document.documentElement.style.setProperty('--keyboard-offset', `${offset}px`)
-      // Authoritative usable height. 100lvh includes the status-bar band that
-      // the installed app can't actually draw into, so layouts sized from it
-      // overflow the screen by that amount and the bottom row gets clipped.
-      // visualViewport reports what's really visible. Ignore it while the
-      // keyboard is up (offset > 0) so the app doesn't collapse.
-      if (offset === 0 && vv.height > 200) {
-        document.documentElement.style.setProperty('--app-vh', `${Math.round(vv.height)}px`)
-      }
-      // Expose the raw numbers so the on-screen badge can report what the
-      // device actually thinks the viewport is.
-      window.__vvH = Math.round(vv.height)
     }
-    update()
     vv.addEventListener('resize', update)
     vv.addEventListener('scroll', update)
-    return () => {
-      vv.removeEventListener('resize', update)
-      vv.removeEventListener('scroll', update)
-      cleanupInsets()
-    }
+    return () => { vv.removeEventListener('resize', update); vv.removeEventListener('scroll', update) }
   }, [])
 
   const [convId, setConvId] = useState(null)
@@ -226,22 +162,8 @@ export default function App() {
       <div className={`sidebar ${sidebarOpen ? 'sidebar--open' : ''} ${sidebarCollapsed ? 'sidebar--collapsed' : ''}`}>
         <div className="sidebar-header">
           <span>butter notebooks</span>
-          {/* Top-left: always visible, unlike the bottom edge which the home
-              indicator can clip — which is exactly what it's here to diagnose. */}
-          <BuildBadge />
           <button className="sidebar-collapse-btn" onClick={() => setSidebarCollapsed(c => !c)} title={sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}>{sidebarCollapsed ? '»' : '«'}</button>
           <button className="sidebar-close-btn" onClick={() => setSidebarOpen(false)}>{'✕'}</button>
-        </div>
-
-        {/* Actions live at the TOP of the drawer. At the bottom they sat in the
-            home-indicator band, where iOS's viewport quirks kept clipping them —
-            no layout maths can fix an edge the system owns. */}
-        <div className="sidebar-actions">
-          <button className="new-chat-btn" onClick={newChat}>+ New chat</button>
-          <button className="theme-toggle" onClick={toggleTheme} title="Toggle theme">
-            {theme === 'dark' ? '☀' : '☾'}
-          </button>
-          <button className="theme-toggle" onClick={logout} title="Log out">{'⏏'}</button>
         </div>
 
         <div className="notes-list">
@@ -267,6 +189,13 @@ export default function App() {
           )}
         </div>
 
+        <div className="sidebar-footer">
+          <button className="new-chat-btn" onClick={newChat}>+ New chat</button>
+          <button className="theme-toggle" onClick={toggleTheme} title="Toggle theme">
+            {theme === 'dark' ? '☀' : '☾'}
+          </button>
+          <button className="theme-toggle" onClick={logout} title="Log out">{'⏏'}</button>
+        </div>
       </div>
 
       <div className="main">

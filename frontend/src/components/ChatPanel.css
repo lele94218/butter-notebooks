@@ -322,10 +322,7 @@
 
 .input-area {
   border-top: 1px solid var(--border);
-  padding: var(--input-padding-y) var(--msg-padding-x) calc(var(--input-padding-y) + 4px + var(--sa-bottom, env(safe-area-inset-bottom)));
-  /* Fill the home-indicator strip with the input area's own surface so it
-     reads as part of the composer instead of dead space below it. */
-  background: var(--bg);
+  padding: var(--input-padding-y) var(--msg-padding-x) calc(var(--input-padding-y) + 4px + env(safe-area-inset-bottom));
 }
 
 .input-inner {
@@ -336,9 +333,6 @@
 .input-row {
   display: flex;
   gap: 8px;
-  /* Buttons stay pinned to the bottom (correct once the textarea wraps to
-     several lines); the textarea itself is centred via its own min-height so a
-     single line doesn't sit at the bottom of a 44pt-tall row. */
   align-items: flex-end;
   background: var(--bg2);
   border: 1px solid var(--border);
@@ -509,24 +503,16 @@ textarea::placeholder { color: var(--text2); }
   padding: 5px 24px;
   font-size: 11px;
   color: var(--text2);
-  /* Sits directly above the composer, so no top border (the composer has one) */
+  border-top: 1px solid var(--border);
   min-height: 24px;
   display: flex;
   align-items: center;
-  flex-shrink: 0;
 }
 
 @media (max-width: 600px) {
   .chat-area { -webkit-overflow-scrolling: touch; }
-  /* iOS zooms the page when focusing an input smaller than 16px.
-     Match the 44pt button height and centre the first line inside it, so a
-     short message isn't pinned to the bottom of the row. */
-  textarea {
-    font-size: 16px;
-    min-height: var(--tap);
-    padding-top: calc((var(--tap) - 1.5em) / 2);
-    padding-bottom: calc((var(--tap) - 1.5em) / 2);
-  }
+  /* iOS zooms the page when focusing an input smaller than 16px. */
+  textarea { font-size: 16px; }
   /* Apple HIG: 44pt minimum touch targets */
   .chat-topbar {
     gap: 8px;

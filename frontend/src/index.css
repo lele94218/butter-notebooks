@@ -90,7 +90,7 @@ body {
   color: var(--text);
   font-family: var(--font-sans);
   line-height: 1.65;
-  height: var(--app-vh, 100dvh);
+  height: 100dvh;
   overflow: hidden;
   transition: background 0.2s, color 0.2s;
   /* Prevent iOS rubber-band scroll from exposing body */
@@ -103,30 +103,18 @@ body {
 }
 
 #root {
-  height: var(--app-vh, 100dvh);
+  height: 100dvh;
   overflow: hidden;
 }
 
-/* Standalone sizing. Every viewport unit lies here in some direction: dvh/svh
-   come up short, and lvh over-reports by the status-bar band. App.jsx measures
-   visualViewport.height and publishes it as --app-vh; these are the fallbacks
-   for the first paint and for when JS hasn't run. */
+/* iOS 26 WebKit: in a standalone PWA with viewport-fit=cover +
+   black-translucent, 100dvh / 100svh / 100% all come up short by the top
+   safe-area inset (~59pt). Only 100lvh reports the true screen height, so the
+   installed app uses that and pays for the insets with padding instead. */
 @media (display-mode: standalone) {
-  :root {
-    /* Fallback only — App.jsx overwrites --app-vh with visualViewport.height,
-       which is the genuinely drawable area. On a real device lvh over-reports
-       by the status-bar band (measured: lvh 874 vs visualViewport 812), so
-       anything sized from lvh alone overflows the screen by that much. */
-    --app-vh: 100lvh;
-    /* CSS-level fallback for the insets, in case the runtime inference in
-       App.jsx doesn't run (it overrides these on <html> when it does). iOS
-       reports env(safe-area-inset-*) as 0 inside the fixed body, so relying on
-       env() alone leaves controls under the home indicator. */
-    --sa-top: 59px;
-    --sa-bottom: 34px;
-  }
-  body { height: var(--app-vh, 100lvh); }
-  #root { height: var(--app-vh, 100lvh); }
+  :root { --app-vh: 100lvh; }
+  body { height: 100lvh; }
+  #root { height: 100lvh; }
 }
 
 ::-webkit-scrollbar { width: 4px; height: 4px; }
