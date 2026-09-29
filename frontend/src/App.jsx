@@ -59,7 +59,7 @@ export default function App() {
   const [activeSessionId, setActiveSessionId] = useState(null)
 
   useEffect(() => {
-    fetchConversations().then(list => {
+    fetchConversations().catch(() => []).then(list => {
       setConversations(list)
       // Restore the conversation that was open before a refresh, so an in-flight
       // run (its question + thinking indicator + live stream) is picked back up
@@ -80,11 +80,24 @@ export default function App() {
   // Keep the sidebar "running" dots live: poll periodically and update only the
   // per-conversation running flag (never touch messages/order/titles).
   useEffect(() => {
+    let backoffUntil = 0
     const poll = setInterval(async () => {
-      const list = await fetchConversations()
+      if (Date.now() < backoffUntil) return
+      let list
+      try {
+        list = await fetchConversations()
+      } catch (e) {
+        // Rate limited (several tabs/devices share the budget): stand down for
+        // a minute rather than adding to the pile.
+        if (e?.status === 429) backoffUntil = Date.now() + 60000
+        return
+      }
       const runningIds = new Set(list.filter(c => c.running).map(c => c.id))
       setConversations(prev => prev.map(c => ({ ...c, running: runningIds.has(c.id) })))
-    }, 4000)
+      // 15s, not 4s: this polls /v1/conversations from every open tab and
+      // device, and at 4s it was eating the endpoint's rate limit — uploads
+      // started failing with 429. A running dot doesn't need to be that live.
+    }, 15000)
     return () => clearInterval(poll)
   }, [])
 

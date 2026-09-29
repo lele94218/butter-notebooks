@@ -5,6 +5,9 @@ export const headers = () => ({ Authorization: `Bearer ${getToken()}` })
 
 export async function fetchConversations() {
   const res = await fetch(`${API_BASE}/v1/conversations`, { headers: headers() })
+  // Signal rate limiting to callers so the sidebar poll can back off instead of
+  // hammering a limit it just hit.
+  if (res.status === 429) { const e = new Error('rate limited'); e.status = 429; throw e }
   if (!res.ok) return []
   const d = await res.json()
   return d.conversations || []

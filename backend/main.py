@@ -69,7 +69,28 @@ def verify_token(authorization: Optional[str]):
         raise HTTPException(status_code=403, detail="Invalid token")
 
 
-limiter = Limiter(key_func=get_remote_address)
+def _client_key(request: Request) -> str:
+    """Rate-limit per real client, not per proxy.
+
+    Every request arrives from the VPS over Tailscale, so get_remote_address
+    returns the same address for everyone and all devices/tabs share one budget
+    — which is how uploads started failing with 429. nginx forwards the caller
+    in X-Real-IP / X-Forwarded-For; prefer those.
+    """
+    ip = (
+        (request.headers.get("x-real-ip") or "").strip()
+        or (request.headers.get("x-forwarded-for") or "").split(",")[0].strip()
+        or get_remote_address(request)
+    )
+    # All devices sit behind one home IP, so the address alone lumps the phone,
+    # the laptop and every open tab into a single budget. Mixing in the
+    # user-agent keeps them apart. Auth is still the Bearer token; this only
+    # affects how the limiter buckets requests.
+    ua = request.headers.get("user-agent") or ""
+    return f"{ip}|{ua[:80]}"
+
+
+limiter = Limiter(key_func=_client_key)
 
 app = FastAPI(title="butter-notebooks")
 app.state.limiter = limiter
@@ -1297,7 +1318,7 @@ def _attach_image_urls(conversations: list[dict]) -> list[dict]:
 
 
 @app.get("/v1/conversations")
-@limiter.limit("60/minute")
+@limiter.limit("240/minute")  # polled by every open tab
 async def list_conversations(request: Request, authorization: Optional[str] = Header(None)):
     verify_token(authorization)
     items = await chat_store.list_conversations(limit=100)
