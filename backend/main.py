@@ -1469,22 +1469,29 @@ _OA_MIME_EXT = {
 
 
 def _oa_extract_images(messages: list[dict]) -> list[dict]:
-    """Pull image_url parts from the LAST user message (OpenAI vision format),
-    save them under UPLOADS_DIR, and return [{path, mime}] for run_agent_stream.
-    Handles data: URIs (base64) and http(s) URLs."""
+    """Pull image_url parts from EVERY user message (OpenAI vision format), save
+    them under UPLOADS_DIR, and return [{path, mime}] for run_agent_stream.
+
+    The shim is stateless — the client resends the whole history each call — so
+    only reading the last message dropped images from earlier turns and the
+    model appeared to "forget" them. Identical bytes are cached by digest so a
+    picture resent on every turn isn't written (or re-sent) repeatedly.
+    """
     import base64 as _b64
+    import hashlib
     import urllib.request
 
-    last_user = None
+    parts_all: list[dict] = []
     for m in messages or []:
-        if m.get("role") == "user":
-            last_user = m
-    content = last_user.get("content") if last_user else None
-    if not isinstance(content, list):
-        return []
+        if m.get("role") != "user":
+            continue
+        c = m.get("content")
+        if isinstance(c, list):
+            parts_all.extend(x for x in c if isinstance(x, dict))
 
     out: list[dict] = []
-    for part in content:
+    seen: set[str] = set()
+    for part in parts_all:
         if not isinstance(part, dict):
             continue
         iu = part.get("image_url")
@@ -1513,12 +1520,19 @@ def _oa_extract_images(messages: list[dict]) -> list[dict]:
             continue
         if not data or len(data) > MAX_UPLOAD_BYTES:
             continue
-        ext = _OA_MIME_EXT.get(mime, ".png")
-        p = UPLOADS_DIR / f"oa-{uuid.uuid4().hex}{ext}"
-        try:
-            p.write_bytes(data)
-        except Exception:
+        digest = hashlib.sha256(data).hexdigest()
+        if digest in seen:
             continue
+        seen.add(digest)
+        ext = _OA_MIME_EXT.get(mime, ".png")
+        # Name by content hash: the same picture arrives again on every turn,
+        # so this reuses the file instead of filling uploads/ with copies.
+        p = UPLOADS_DIR / f"oa-{digest[:32]}{ext}"
+        if not p.exists():
+            try:
+                p.write_bytes(data)
+            except Exception:
+                continue
         out.append({"path": str(p), "mime": mime})
     return out
 
