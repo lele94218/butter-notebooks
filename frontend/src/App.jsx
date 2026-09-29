@@ -221,6 +221,17 @@ export default function App() {
           <button className="sidebar-close-btn" onClick={() => setSidebarOpen(false)}>{'✕'}</button>
         </div>
 
+        {/* Actions live at the TOP of the drawer. At the bottom they sat in the
+            home-indicator band, where iOS's viewport quirks kept clipping them —
+            no layout maths can fix an edge the system owns. */}
+        <div className="sidebar-actions">
+          <button className="new-chat-btn" onClick={newChat}>+ New chat</button>
+          <button className="theme-toggle" onClick={toggleTheme} title="Toggle theme">
+            {theme === 'dark' ? '☀' : '☾'}
+          </button>
+          <button className="theme-toggle" onClick={logout} title="Log out">{'⏏'}</button>
+        </div>
+
         <div className="notes-list">
           {conversations.length === 0 ? (
             <div className="sidebar-empty">No saved chats yet</div>
@@ -244,13 +255,6 @@ export default function App() {
           )}
         </div>
 
-        <div className="sidebar-footer">
-          <button className="new-chat-btn" onClick={newChat}>+ New chat</button>
-          <button className="theme-toggle" onClick={toggleTheme} title="Toggle theme">
-            {theme === 'dark' ? '☀' : '☾'}
-          </button>
-          <button className="theme-toggle" onClick={logout} title="Log out">{'⏏'}</button>
-        </div>
       </div>
 
       <div className="main">
