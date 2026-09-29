@@ -477,10 +477,15 @@ async def _codex_attempt(
     # NOTE: `-i/--image` is variadic (`<FILE>...`), so the positional PROMPT must
     # come BEFORE the image args — otherwise codex swallows the prompt as another
     # image path, finds no prompt, and fails with "No prompt provided via stdin".
+    # `--` terminates option parsing: without it a message that starts with a
+    # dash (e.g. "-ln0.1 同一批才对吧") is parsed as flags and codex exits with
+    # "unexpected argument '-l'". The turn then looks like an expired session to
+    # the self-heal path, which starts a fresh one — silently losing the
+    # conversation's context. Image args must come before `--`.
     if session_id:
         cmd = [CODEX_BIN, "exec", "resume", session_id, "--json", "--skip-git-repo-check", BYPASS]
-        cmd.append(prompt)
         cmd += img_args
+        cmd += ["--", prompt]
     else:
         cmd = [CODEX_BIN, "exec", "--json", "--skip-git-repo-check", BYPASS]
         cfg = CODEX_MODELS.get(model or "", {})
@@ -488,9 +493,9 @@ async def _codex_attempt(
             cmd += ["-m", cfg["model"]]
         if cfg.get("effort"):
             cmd += ["-c", f"model_reasoning_effort={cfg['effort']}"]
-        # Nudge output formatting to match the app's Markdown/KaTeX renderer.
-        cmd.append(CLAUDE_SYSTEM_PROMPT + "\n\n" + prompt)
         cmd += img_args
+        # Nudge output formatting to match the app's Markdown/KaTeX renderer.
+        cmd += ["--", CLAUDE_SYSTEM_PROMPT + "\n\n" + prompt]
 
     env = {k: v for k, v in os.environ.items() if k != "CLAUDECODE"}
 
