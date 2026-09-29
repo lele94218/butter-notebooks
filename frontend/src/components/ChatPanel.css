@@ -511,8 +511,17 @@ textarea::placeholder { color: var(--text2); }
 
 @media (max-width: 600px) {
   .chat-area { -webkit-overflow-scrolling: touch; }
-  /* iOS zooms the page when focusing an input smaller than 16px. */
-  textarea { font-size: 16px; }
+  /* iOS zooms the page when focusing an input smaller than 16px.
+     The row is align-items:flex-end (correct once the text wraps to several
+     lines), but with 44pt buttons a one-line textarea was pinned to the bottom
+     of a tall row. Matching the button height and padding the single line
+     symmetrically centres it; it still grows upward as the message wraps. */
+  textarea {
+    font-size: 16px;
+    min-height: var(--tap);
+    padding-top: calc((var(--tap) - 1.5em) / 2);
+    padding-bottom: calc((var(--tap) - 1.5em) / 2);
+  }
   /* Apple HIG: 44pt minimum touch targets */
   .chat-topbar {
     gap: 8px;
