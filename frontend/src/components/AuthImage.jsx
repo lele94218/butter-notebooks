@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { API_BASE } from '../lib/constants'
 import { headers } from '../lib/api'
+import ZoomableImg from './ImageViewer'
 
 export default function AuthImage({ url, className, alt }) {
   const [src, setSrc] = useState(null)
@@ -22,5 +23,5 @@ export default function AuthImage({ url, className, alt }) {
     }
   }, [url])
   if (!src) return <div className={`${className || ''} msg-image--loading`} />
-  return <img src={src} className={className} alt={alt} />
+  return <ZoomableImg src={src} className={className} alt={alt} />
 }

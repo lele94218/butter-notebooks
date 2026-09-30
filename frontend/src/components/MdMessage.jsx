@@ -8,6 +8,7 @@ import { ThemeContext } from '../lib/theme'
 import { API_BASE } from '../lib/constants'
 import { getToken } from '../lib/api'
 import CodeBlock from './CodeBlock'
+import ZoomableImg from './ImageViewer'
 
 // Rewrite markdown refs to a local image file → the served /v1/img URL so the
 // image renders (mirrors the backend shim). Handles `![alt](path)` and upgrades
@@ -64,7 +65,7 @@ function makeMdComponents(theme) {
       return <a href={href} target="_blank" rel="noopener noreferrer">{children}</a>
     },
     img({ src, alt }) {
-      return <img src={src} alt={alt || ''} loading="lazy"
+      return <ZoomableImg src={src} alt={alt || ''}
         style={{ maxWidth: '100%', height: 'auto', borderRadius: 8, display: 'block' }} />
     },
     table({ children }) {

@@ -1,0 +1,72 @@
+/* Full-screen image viewer, portalled to <body>. position:fixed + inset:0
+   resolves against the viewport, which sidesteps the viewport-unit quirks the
+   standalone PWA has with 100lvh/100dvh. */
+.imgview {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  background: rgba(0, 0, 0, 0.92);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  overscroll-behavior: contain;
+  animation: imgview-in 0.15s ease;
+}
+@keyframes imgview-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+.imgview-img {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+  /* The gestures are handled in JS; let none of them scroll the page. */
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-user-drag: none;
+  will-change: transform;
+}
+
+.imgview-close {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  border: none;
+  background: rgba(255, 255, 255, 0.14);
+  color: #fff;
+  font-size: 15px;
+  line-height: 1;
+  cursor: pointer;
+  display: none;
+}
+.imgview-close:hover { background: rgba(255, 255, 255, 0.26); }
+/* Pointer devices only: on a phone you tap or swipe down to close, and a corner
+   button would have to dodge the status bar / notch. */
+@media (hover: hover) and (pointer: fine) {
+  .imgview-close { display: block; }
+}
+
+.imgview-hint {
+  position: absolute;
+  bottom: calc(24px + env(safe-area-inset-bottom));
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 5px 12px;
+  border-radius: 14px;
+  background: rgba(0, 0, 0, 0.45);
+  color: rgba(255, 255, 255, 0.75);
+  font-size: 12px;
+  pointer-events: none;
+}
+
+/* Thumbnails in the transcript are now interactive. */
+.msg-image,
+.prose img {
+  cursor: zoom-in;
+}

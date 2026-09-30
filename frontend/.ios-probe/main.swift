@@ -6,10 +6,16 @@ class VC: UIViewController {
   override func viewDidLoad() {
     super.viewDidLoad()
     let cfg = WKWebViewConfiguration()
+    // Optional: open a specific conversation (BWK_CONV) so a probe can act on
+    // its contents — e.g. tapping an image to check the viewer.
+    let conv = ProcessInfo.processInfo.environment["BWK_CONV"] ?? ""
+    let seed = conv.isEmpty ? "" :
+      "try { localStorage.setItem('butter_active_conv', '\(conv)'); } catch (e) {}"
     // Report display-mode:standalone + navigator.standalone like a home-screen app
     let js = """
     (function(){
       Object.defineProperty(navigator,'standalone',{value:true,configurable:true});
+      \(seed)
       // A WKWebView doesn't match @media (display-mode: standalone), but a
       // home-screen PWA does — copy those rules out of the media block so the
       // test environment matches the real installed app.
@@ -51,9 +57,17 @@ class VC: UIViewController {
     let url = ProcessInfo.processInfo.environment["BWK_URL"]
       ?? "https://your-site.example.com/?t=your-secret-token"
     web.load(URLRequest(url: URL(string: url)!))
-    // After load: open the drawer and dump the geometry we care about.
+    // After load: perform the mode's action, then dump the geometry.
+    // BWK_MODE reaches the app as SIMCTL_CHILD_BWK_MODE when launched by simctl.
     DispatchQueue.main.asyncAfter(deadline: .now() + 6) {
-      self.web.evaluateJavaScript("document.querySelector('.menu-btn')?.click(); 'ok'") { _, _ in }
+      let mode = ProcessInfo.processInfo.environment["BWK_MODE"] ?? "drawer"
+      let action: String
+      switch mode {
+      case "lightbox": action = "document.querySelector('.msg-image')?.click()"
+      case "keyboard": action = "document.querySelector('textarea')?.focus()"
+      default:         action = "document.querySelector('.menu-btn')?.click()"
+      }
+      self.web.evaluateJavaScript(action + "; 'ok'") { _, _ in }
       DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
         let probe = """
         (function(){
@@ -68,6 +82,8 @@ class VC: UIViewController {
             lvh:(()=>{const d=document.createElement('div');d.style.cssText='position:absolute;height:100lvh';
               document.body.appendChild(d);const v=d.getBoundingClientRect().height;d.remove();return Math.round(v)})(),
             sidebar:R('.sidebar'), footer:R('.sidebar-footer'), btn:R('.new-chat-btn'),
+            overlay:R('.imgview'), bigImg:R('.imgview-img'),
+            screenH:Math.round(window.screen.height),
             sbScrollH:sb?sb.scrollHeight:null, sbClientH:sb?sb.clientHeight:null
           });
         })()
