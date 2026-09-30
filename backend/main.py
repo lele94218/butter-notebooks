@@ -635,6 +635,7 @@ async def run_agent_stream(
     attempt_session = session_id
     for attempt_no in (1, 2):
         produced = False
+        saw_session = False
         retry = False
         async for sse in attempt_fn(prompt, attempt_session, model, images):
             ev = _parse_sse_line(sse) or {}
@@ -643,10 +644,16 @@ async def run_agent_stream(
                 produced = True
                 yield sse
             elif et == "session":
+                # The CLI only reports a session once it has actually started,
+                # so this means the resume worked.
+                saw_session = True
                 yield sse
             elif et in ("done", "error"):
-                # Empty/failed resume: retry once with a fresh session.
-                if attempt_session and not produced and attempt_no == 1:
+                # Failed resume: retry once with a fresh session. A turn that
+                # simply says nothing is NOT a failure — `/compact` and friends
+                # answer with no assistant text, and healing those threw the
+                # conversation away. Only heal when the CLI never even started.
+                if attempt_session and not produced and not saw_session and attempt_no == 1:
                     retry = True
                     break
                 yield sse
