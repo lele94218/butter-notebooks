@@ -3,7 +3,7 @@ import { API_BASE, TOKEN_KEY } from '../lib/constants'
 import './LoginScreen.css'
 
 export default function LoginScreen({ onAuth }) {
-  const [input, setInput] = useState(import.meta.env.VITE_API_TOKEN || '')
+  const [input, setInput] = useState('')
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
 
@@ -14,7 +14,8 @@ export default function LoginScreen({ onAuth }) {
     setLoading(true)
     setError('')
     try {
-      const res = await fetch(`${API_BASE}/health`, {
+      // /v1/auth, not /health: the latter is public, so it accepted any token.
+      const res = await fetch(`${API_BASE}/v1/auth`, {
         headers: { Authorization: `Bearer ${token}` }
       })
       if (res.ok) {

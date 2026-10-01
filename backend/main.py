@@ -979,7 +979,20 @@ class TTSRequest(BaseModel):
 @app.get("/health")
 @limiter.limit("30/minute")
 async def health(request: Request):
-    return {"status": "ok", "notes_root": NOTES_ROOT}
+    """Unauthenticated liveness probe — must not disclose anything about the
+    host. It used to return NOTES_ROOT, which published an absolute path (and
+    the account name) to anyone who asked."""
+    return {"status": "ok"}
+
+
+@app.get("/v1/auth")
+@limiter.limit("30/minute")
+async def check_auth(request: Request, authorization: Optional[str] = Header(None)):
+    """Token check for the login screen. It used to validate against /health,
+    which is public — so any string was accepted and the app loaded into a state
+    where every request then failed with 403."""
+    verify_token(authorization)
+    return {"ok": True}
 
 
 @app.post("/v1/tts")
