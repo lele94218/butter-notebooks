@@ -44,24 +44,31 @@ export default function PdfView({ data, title }) {
 
   useEffect(() => {
     let cancelled = false
-    let loaded = null
+    // Tear down via the loading task: in pdf.js 6 the document proxy has no
+    // destroy() of its own, and calling one crashed the whole pane when
+    // switching away from an open PDF.
+    let task = null
+    setDoc(null)
+    setPageSize(null)
+    setError('')
     ;(async () => {
       try {
         const pdfjs = await loadPdfjs()
         // The buffer is transferred to the worker, so hand over a copy —
         // otherwise a re-render finds it detached.
-        const task = pdfjs.getDocument({ data: data.slice(0) })
-        loaded = await task.promise
-        if (cancelled) { loaded.destroy(); return }
+        task = pdfjs.getDocument({ data: data.slice(0) })
+        const loaded = await task.promise
+        if (cancelled) return
         const first = await loaded.getPage(1)
         const vp = first.getViewport({ scale: 1 })
+        if (cancelled) return
         setPageSize({ w: vp.width, h: vp.height })
         setDoc(loaded)
       } catch (e) {
         if (!cancelled) setError(e?.message || String(e))
       }
     })()
-    return () => { cancelled = true; loaded?.destroy() }
+    return () => { cancelled = true; task?.destroy() }
   }, [data])
 
   useEffect(() => () => roRef.current?.disconnect(), [])
@@ -107,17 +114,23 @@ function PdfPage({ doc, number, width, height, scale }) {
   }, [])
 
   const draw = useCallback(async () => {
-    const canvas = canvasRef.current
-    if (!canvas || !scale) return
+    if (!scale) return
     taskRef.current?.cancel()
-    const page = await doc.getPage(number)
-    const dpr = Math.min(MAX_DPR, window.devicePixelRatio || 1)
-    const viewport = page.getViewport({ scale: scale * dpr })
-    canvas.width = Math.round(viewport.width)
-    canvas.height = Math.round(viewport.height)
-    const task = page.render({ canvasContext: canvas.getContext('2d'), viewport })
-    taskRef.current = task
-    try { await task.promise } catch { /* cancelled on scroll-away or resize */ }
+    // getPage rejects once the document is torn down — which happens whenever
+    // the reader switches files mid-render — so the whole thing is guarded,
+    // not just the render promise.
+    try {
+      const page = await doc.getPage(number)
+      const canvas = canvasRef.current
+      if (!canvas) return
+      const dpr = Math.min(MAX_DPR, window.devicePixelRatio || 1)
+      const viewport = page.getViewport({ scale: scale * dpr })
+      canvas.width = Math.round(viewport.width)
+      canvas.height = Math.round(viewport.height)
+      const task = page.render({ canvasContext: canvas.getContext('2d'), viewport })
+      taskRef.current = task
+      await task.promise
+    } catch { /* cancelled by a scroll, a resize, or switching note */ }
   }, [doc, number, scale])
 
   useEffect(() => {
