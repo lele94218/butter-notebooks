@@ -99,6 +99,7 @@ export default function PdfView({ data, title }) {
 function PdfPage({ doc, number, width, height, scale }) {
   const ref = useRef(null)
   const canvasRef = useRef(null)
+  const textRef = useRef(null)
   const taskRef = useRef(null)
   const [visible, setVisible] = useState(false)
 
@@ -130,6 +131,20 @@ function PdfPage({ doc, number, width, height, scale }) {
       const task = page.render({ canvasContext: canvas.getContext('2d'), viewport })
       taskRef.current = task
       await task.promise
+
+      // Transparent, positioned text over the canvas. Without it a PDF is just
+      // a picture: nothing to select, and so nothing to ask about.
+      const host = textRef.current
+      if (!host) return
+      host.replaceChildren()
+      const pdfjs = await loadPdfjs()
+      const layer = new pdfjs.TextLayer({
+        textContentSource: page.streamTextContent(),
+        container: host,
+        // CSS pixels — the canvas is oversampled by dpr but displayed at this size.
+        viewport: page.getViewport({ scale }),
+      })
+      await layer.render()
     } catch { /* cancelled by a scroll, a resize, or switching note */ }
   }, [doc, number, scale])
 
@@ -139,8 +154,13 @@ function PdfPage({ doc, number, width, height, scale }) {
   }, [visible, draw])
 
   return (
-    <div className="pdfview-page" ref={ref} style={{ width, height }}>
+    <div
+      className="pdfview-page"
+      ref={ref}
+      style={{ width, height, '--total-scale-factor': scale }}
+    >
       {visible && <canvas ref={canvasRef} style={{ width, height }} />}
+      {visible && <div className="textLayer" ref={textRef} />}
       <span className="pdfview-num">{number}</span>
     </div>
   )
