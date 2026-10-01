@@ -51,6 +51,8 @@ export default function App() {
     return saved
   })
   const [sidebarOpen, setSidebarOpen] = useState(false)
+  // Leaving Chat hides the drawer; don't let it be left open underneath.
+  useEffect(() => { if (tab !== 'chat') setSidebarOpen(false) }, [tab])
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
 
   const [conversations, setConversations] = useState([])
@@ -160,6 +162,11 @@ export default function App() {
     if (activeConvId === id) newChat()
   }
 
+  // The conversation list only means something in Chat. In Notes the file tree
+  // is the navigation, and two pinned rails left the note itself with a third
+  // of the window on a narrow screen (#7).
+  const showChatList = tab === 'chat'
+
   if (!authed) return <LoginScreen onAuth={() => setAuthed(true)} />
 
   const logout = () => {
@@ -170,8 +177,9 @@ export default function App() {
   return (
     <ThemeContext.Provider value={theme}>
     <div className="app" data-theme={theme}>
-      {sidebarOpen && <div className="sidebar-backdrop" onClick={() => setSidebarOpen(false)} />}
+      {showChatList && sidebarOpen && <div className="sidebar-backdrop" onClick={() => setSidebarOpen(false)} />}
 
+      {showChatList && (
       <div className={`sidebar ${sidebarOpen ? 'sidebar--open' : ''} ${sidebarCollapsed ? 'sidebar--collapsed' : ''}`}>
         <div className="sidebar-header">
           <span>butter notebooks</span>
@@ -210,10 +218,13 @@ export default function App() {
           <button className="theme-toggle" onClick={logout} title="Log out">{'⏏'}</button>
         </div>
       </div>
+      )}
 
       <div className="main">
         <div className="tab-bar">
-          <button className="menu-btn" onClick={() => setSidebarOpen(o => !o)}>{'☰'}</button>
+          {showChatList && (
+            <button className="menu-btn" onClick={() => setSidebarOpen(o => !o)}>{'☰'}</button>
+          )}
           <div className={`tab ${tab === 'chat' ? 'active' : ''}`} onClick={() => { setTab('chat'); localStorage.setItem('butter_last_tab', 'chat') }}>Chat</div>
           <div className={`tab ${tab === 'notes' ? 'active' : ''}`} onClick={() => { setTab('notes'); localStorage.setItem('butter_last_tab', 'notes') }}>Notes</div>
           {SHOW_CODE_TAB && (
