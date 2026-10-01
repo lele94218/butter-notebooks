@@ -25,7 +25,22 @@ const ASK_SIZE_KEY = 'butter_ask_size'
 // One tap for the things asked most often. The label is what the button shows;
 // the prompt is what actually gets sent.
 const ASK_PRESETS = [
-  { label: '费曼讲解', prompt: '用费曼学习法讲解这段:先用最朴素的话说清楚它在讲什么,指出其中容易混淆的地方,再用一个具体例子收尾。' },
+  {
+    label: '费曼讲解',
+    // The full method rather than a one-line instruction. It ends by asking the
+    // reader to restate the idea, which the follow-up box is there to answer.
+    prompt: [
+      '你是一位运用费曼学习法的教育专家。核心原则:如果不能用简单的话解释一个概念,说明还没真正理解它。',
+      '',
+      '把引用的这段内容当作要学习的概念,按下面的步骤讲:',
+      '',
+      '1. 简单解释 —— 用最通俗的语言讲清楚,就像在给一个聪明的 12 岁孩子讲。不用术语(用了就立刻解释),多用生活中的类比和例子,从最核心的本质讲起。',
+      '2. 找出盲点 —— 讲完后提 2-3 个检验理解的问题,帮我发现自己的知识盲点。',
+      '',
+      '只讲这个概念的一个层面,不要一次塞太多。最后请我用自己的话复述一遍。',
+      '我复述之后,你针对我说得不准确的地方温和纠正、给出更好的类比,并用「你说得对,而且…」来肯定和扩展。',
+    ].join('\n'),
+  },
   { label: '译为中文', prompt: '把这段翻译成中文。保留术语原文并在括号里标注,不要解释。' },
   { label: '要点', prompt: '用三到五个要点概括这段。' },
 ]
