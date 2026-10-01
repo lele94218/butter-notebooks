@@ -11,10 +11,15 @@ class VC: UIViewController {
     // Auth and the conversation to open are seeded into localStorage rather
     // than passed in the URL, so the token never lands in history or a log.
     let conv = ProcessInfo.processInfo.environment["BWK_CONV"] ?? ""
+    let note = ProcessInfo.processInfo.environment["BWK_NOTE"] ?? ""
     let token = ProcessInfo.processInfo.environment["BWK_TOKEN"] ?? ""
     var seedParts: [String] = []
     if !token.isEmpty { seedParts.append("localStorage.setItem('butter_auth_token', '\(token)');") }
     if !conv.isEmpty { seedParts.append("localStorage.setItem('butter_active_conv', '\(conv)');") }
+    if !note.isEmpty {
+      seedParts.append("localStorage.setItem('butter_last_note', '\(note)');")
+      seedParts.append("localStorage.setItem('butter_last_tab', 'notes');")
+    }
     let seed = seedParts.isEmpty ? "" : "try { " + seedParts.joined(separator: " ") + " } catch (e) {}"
     // Report display-mode:standalone + navigator.standalone like a home-screen app
     let js = """

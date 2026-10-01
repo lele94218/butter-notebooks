@@ -1272,6 +1272,45 @@ async def serve_upload(
     return FileResponse(str(target), media_type=mime or "application/octet-stream")
 
 
+# What the Notes tab will open. An allowlist rather than "anything that isn't
+# Markdown", so the tree doesn't fill up with fonts, archives and stray binaries.
+NOTE_TEXT_EXTS = {
+    ".md", ".markdown", ".txt", ".text", ".log", ".csv", ".tsv",
+    ".py", ".js", ".jsx", ".ts", ".tsx", ".json", ".yaml", ".yml", ".toml",
+    ".ini", ".cfg", ".conf", ".sh", ".bash", ".zsh", ".fish", ".sql",
+    ".c", ".h", ".cpp", ".hpp", ".cc", ".rs", ".go", ".java", ".kt", ".rb",
+    ".php", ".swift", ".m", ".r", ".jl", ".lua", ".vim", ".css", ".scss",
+    ".html", ".htm", ".xml", ".svg", ".tex", ".bib", ".gitignore", ".env.example",
+}
+NOTE_BINARY_EXTS = {".pdf"}
+NOTE_EXTS = NOTE_TEXT_EXTS | NOTE_BINARY_EXTS
+
+# Reading a file is capped so a stray multi-megabyte log can't be pulled into
+# the browser as one JSON string.
+MAX_NOTE_BYTES = 2 * 1024 * 1024
+
+
+def _note_kind(path: Path) -> str:
+    ext = path.suffix.lower()
+    if ext in NOTE_BINARY_EXTS:
+        return "pdf"
+    if ext in (".md", ".markdown"):
+        return "markdown"
+    return "text"
+
+
+def _resolve_note(path: str) -> Path:
+    """Resolve a vault-relative path, refusing anything outside NOTES_ROOT."""
+    target = Path(NOTES_ROOT) / path
+    if not target.exists() or not target.is_file():
+        raise HTTPException(status_code=404, detail="File not found")
+    try:
+        target.resolve().relative_to(Path(NOTES_ROOT).resolve())
+    except ValueError:
+        raise HTTPException(status_code=403, detail="Access denied")
+    return target
+
+
 @app.get("/v1/notes")
 @limiter.limit("60/minute")
 async def list_notes(request: Request, path: str = "", authorization: Optional[str] = Header(None)):
@@ -1284,13 +1323,17 @@ async def list_notes(request: Request, path: str = "", authorization: Optional[s
     def _scan():
         import subprocess
         # Use find via subprocess — runs in its own process, won't block the event loop
+        # -not -path "*/.*" drops dotfiles and everything under a dot directory
+        # (.git, .obsidian, .claude), which is noise in a reading tree.
         result = subprocess.run(
-            ["find", str(base), "-name", "*.md", "-type", "f"],
+            ["find", str(base), "-type", "f", "-not", "-path", "*/.*"],
             capture_output=True, text=True, timeout=10
         )
         files = []
         for line in sorted(result.stdout.splitlines()):
             p = Path(line.strip())
+            if p.suffix.lower() not in NOTE_EXTS:
+                continue
             try:
                 files.append(str(p.relative_to(NOTES_ROOT)))
             except ValueError:
@@ -1313,17 +1356,49 @@ async def list_notes(request: Request, path: str = "", authorization: Optional[s
 @app.get("/v1/notes/read")
 @limiter.limit("60/minute")
 async def read_note(request: Request, path: str = "", authorization: Optional[str] = Header(None)):
-    """Read a markdown file."""
+    """Read a text file from the vault.
+
+    `kind` tells the client how to show it: Markdown gets rendered, anything
+    else is source or prose that should be shown verbatim. PDFs are binary and
+    go through /v1/notes/file instead.
+    """
     verify_token(authorization)
-    target = Path(NOTES_ROOT) / path
-    if not target.exists():
-        raise HTTPException(status_code=404, detail="File not found")
-    # Prevent path traversal
+    target = _resolve_note(path)
+    kind = _note_kind(target)
+    if kind == "pdf":
+        raise HTTPException(status_code=415, detail="Binary file — use /v1/notes/file")
+    if target.suffix.lower() not in NOTE_TEXT_EXTS:
+        raise HTTPException(status_code=415, detail=f"Unsupported file type: {target.suffix}")
+
+    size = target.stat().st_size
+    truncated = size > MAX_NOTE_BYTES
+    raw = target.read_bytes()[:MAX_NOTE_BYTES] if truncated else target.read_bytes()
     try:
-        target.resolve().relative_to(Path(NOTES_ROOT).resolve())
-    except ValueError:
-        raise HTTPException(status_code=403, detail="Access denied")
-    return {"path": path, "content": target.read_text()}
+        content = raw.decode("utf-8")
+    except UnicodeDecodeError:
+        # Mis-labelled or genuinely binary: show what is readable rather than 500.
+        content = raw.decode("utf-8", errors="replace")
+    return {
+        "path": path,
+        "content": content,
+        "kind": kind,
+        "language": target.suffix.lower().lstrip("."),
+        "truncated": truncated,
+    }
+
+
+@app.get("/v1/notes/file")
+@limiter.limit("60/minute")
+async def read_note_file(request: Request, path: str = "", authorization: Optional[str] = Header(None)):
+    """Stream a vault file as bytes — the PDF viewer needs the file itself, not
+    JSON. Auth is the usual header; the frontend fetches it as a blob so no
+    credential ends up in a URL."""
+    verify_token(authorization)
+    target = _resolve_note(path)
+    if target.suffix.lower() not in NOTE_EXTS:
+        raise HTTPException(status_code=415, detail="Unsupported file type")
+    mt = mimetypes.guess_type(str(target))[0] or "application/octet-stream"
+    return FileResponse(target, media_type=mt)
 
 
 def _attach_image_urls(conversations: list[dict]) -> list[dict]:

@@ -150,3 +150,32 @@
   .notes-expand-btn { min-height: var(--tap); padding: 0 14px; font-size: 14px; }
   .notes-filetree-header { padding-right: 4px; }
 }
+
+/* A PDF fills the pane — it brings its own scrolling and toolbar, so the reading
+   padding and the panel's own scrollbar would only shrink it. The height has to
+   be handed down the whole chain; flex:1 alone left the iframe at 150px. */
+.note-panel--pdf {
+  padding: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+.note-content--pdf {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  max-width: none;
+}
+.note-pdf {
+  flex: 1;
+  width: 100%;
+  height: 100%;
+  border: none;
+  background: var(--bg2);
+}
+
+.note-truncated {
+  margin-bottom: 10px;
+  font-size: 12px;
+  color: var(--text2);
+}

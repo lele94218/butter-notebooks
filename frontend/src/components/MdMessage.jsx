@@ -27,9 +27,11 @@ function rewriteLocalImages(text) {
   })
 }
 
-function makeMdComponents(theme) {
+// Shared so the Notes tab can highlight a whole source file with the same
+// colours the chat uses for a fenced block.
+function makeCodeStyle(theme) {
   const base = theme === 'dark' ? oneDark : oneLight
-  const codeStyle = {
+  return {
     ...base,
     'pre[class*="language-"]': {
       ...base['pre[class*="language-"]'],
@@ -49,6 +51,10 @@ function makeMdComponents(theme) {
       background: 'none',
     },
   }
+}
+
+function makeMdComponents(theme) {
+  const codeStyle = makeCodeStyle(theme)
   return {
     pre({ children }) {
       return <>{children}</>
@@ -99,4 +105,4 @@ const MdMessage = memo(function MdMessage({ text, streaming }) {
 })
 
 export default MdMessage
-export { makeMdComponents, katexOptions }
+export { makeMdComponents, makeCodeStyle, katexOptions }
