@@ -21,6 +21,14 @@ const ASK_MODELS = [
 ]
 const ASK_MODEL_KEY = 'butter_ask_model'
 
+// One tap for the things asked most often. The label is what the button shows;
+// the prompt is what actually gets sent.
+const ASK_PRESETS = [
+  { label: '费曼讲解', prompt: '用费曼学习法讲解这段:先用最朴素的话说清楚它在讲什么,指出其中容易混淆的地方,再用一个具体例子收尾。' },
+  { label: '译为中文', prompt: '把这段翻译成中文。保留术语原文并在括号里标注,不要解释。' },
+  { label: '要点', prompt: '用三到五个要点概括这段。' },
+]
+
 // Goes through the OpenAI-compatible endpoint on purpose: it runs the agent
 // without a session and writes nothing, so asking about a line of a note
 // doesn't leave a conversation behind.
@@ -97,7 +105,8 @@ export default function AskPopover({ quote, notePath, anchor, onClose }) {
 
   useEffect(() => () => abortRef.current?.abort(), [])
 
-  const run = useCallback(async () => {
+  const run = useCallback(async (override) => {
+    const ask = typeof override === 'string' ? override : question
     abortRef.current?.abort()
     const ctl = new AbortController()
     abortRef.current = ctl
@@ -105,7 +114,7 @@ export default function AskPopover({ quote, notePath, anchor, onClose }) {
     setError('')
     setState('running')
     try {
-      for await (const piece of askStream({ quote, question, notePath, model, signal: ctl.signal })) {
+      for await (const piece of askStream({ quote, question: ask, notePath, model, signal: ctl.signal })) {
         setAnswer(prev => prev + piece)
       }
       setState('done')
@@ -124,7 +133,13 @@ export default function AskPopover({ quote, notePath, anchor, onClose }) {
     <div
       ref={boxRef}
       className="ask-pop"
-      style={{ top: anchor.top, left: anchor.left }}
+      style={{
+        top: anchor.top,
+        left: anchor.left,
+        // Bound by what's actually below the anchor, so a long answer scrolls
+        // inside the box instead of running off the bottom of the screen.
+        maxHeight: Math.max(240, window.innerHeight - anchor.top - 16),
+      }}
       onMouseDown={e => e.stopPropagation()}
     >
       <div className="ask-pop-quote">{quote}</div>
@@ -148,10 +163,18 @@ export default function AskPopover({ quote, notePath, anchor, onClose }) {
       </div>
 
       <div className="ask-pop-foot">
+        {ASK_PRESETS.map(p => (
+          <button
+            key={p.label}
+            className="ask-pop-preset"
+            onClick={() => { setQuestion(p.prompt); run(p.prompt) }}
+            title={p.prompt}
+          >{p.label}</button>
+        ))}
+        <span className="ask-pop-spacer" />
         <select className="ask-pop-model" value={model} onChange={e => setModel(e.target.value)}>
           {ASK_MODELS.map(m => <option key={m} value={m}>{m}</option>)}
         </select>
-        <span className="ask-pop-hint">Nothing is saved to your chats</span>
         <button className="ask-pop-close" onClick={() => { abortRef.current?.abort(); onClose() }}>✕</button>
       </div>
 

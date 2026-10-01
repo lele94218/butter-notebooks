@@ -31,23 +31,27 @@
   border-radius: 12px;
   background: var(--bg2);
   box-shadow: 0 8px 32px rgba(0, 0, 0, 0.42);
+  /* maxHeight comes from the component; hiding the overflow here lets the
+     answer be the one part that scrolls. */
+  overflow: hidden;
 }
 
 /* The passage being asked about. Capped so a long selection doesn't push the
    input and the answer off screen. */
 .ask-pop-quote {
-  max-height: 84px;
+  flex-shrink: 0;
+  max-height: 72px;
   overflow-y: auto;
   padding-left: 9px;
   border-left: 2px solid var(--accent);
   color: var(--text2);
-  font-size: 12.5px;
+  font-size: 11.5px;
   line-height: 1.5;
   white-space: pre-wrap;
   word-break: break-word;
 }
 
-.ask-pop-row { display: flex; gap: 8px; }
+.ask-pop-row { display: flex; gap: 8px; flex-shrink: 0; }
 
 .ask-pop-input {
   flex: 1;
@@ -58,7 +62,7 @@
   background: var(--bg);
   color: var(--text);
   font: inherit;
-  font-size: 13px;
+  font-size: 12.5px;
 }
 .ask-pop-input:focus { outline: none; border-color: var(--text3); }
 
@@ -69,7 +73,7 @@
   border-radius: 8px;
   background: transparent;
   color: var(--text2);
-  font-size: 13px;
+  font-size: 12.5px;
   cursor: pointer;
 }
 .ask-pop-btn:hover { color: var(--text); border-color: var(--text3); }
@@ -78,20 +82,33 @@
 .ask-pop-foot {
   display: flex;
   align-items: center;
-  gap: 8px;
-  font-size: 11.5px;
+  gap: 6px;
+  flex-shrink: 0;
+  flex-wrap: wrap;
+  font-size: 11px;
   color: var(--text3);
 }
+.ask-pop-preset {
+  padding: 3px 9px;
+  border: 1px solid var(--border);
+  border-radius: 11px;
+  background: transparent;
+  color: var(--text2);
+  font-size: 11px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.ask-pop-preset:hover { border-color: var(--accent); color: var(--accent); }
+.ask-pop-spacer { flex: 1; }
 .ask-pop-model {
   padding: 2px 6px;
   border: 1px solid var(--border);
   border-radius: 6px;
   background: var(--bg);
   color: var(--text2);
-  font-size: 11.5px;
+  font-size: 11px;
   cursor: pointer;
 }
-.ask-pop-hint { flex: 1; opacity: 0.8; }
 .ask-pop-close {
   background: none;
   border: none;
@@ -103,12 +120,32 @@
 .ask-pop-close:hover { color: var(--text); }
 
 .ask-pop-answer {
-  max-height: 46vh;
-  overflow-y: auto;
+  flex: 1;
+  min-height: 0;
   padding-top: 8px;
   border-top: 1px solid var(--border);
-  font-size: 13.5px;
 }
+/* .prose forces overflow: visible (it must not create a second scroll context
+   inside a note on iOS). Here it is the scroller, so this needs both classes to
+   win on specificity. */
+.ask-pop-answer.prose {
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+/* .prose is sized for reading a full note (1rem/1.75rem) and its headings use
+   rem, so they ignore a parent font-size. Restate the sizes in em so the whole
+   answer scales down together. */
+.ask-pop-answer.prose { font-size: 12.5px; line-height: 1.6; }
+.ask-pop-answer.prose p,
+.ask-pop-answer.prose li { line-height: 1.6; margin-bottom: 0.6em; }
+.ask-pop-answer.prose h1 { font-size: 1.15em; }
+.ask-pop-answer.prose h2 { font-size: 1.08em; }
+.ask-pop-answer.prose h3 { font-size: 1em; }
+.ask-pop-answer.prose h1,
+.ask-pop-answer.prose h2,
+.ask-pop-answer.prose h3 { margin: 0.7em 0 0.35em; }
+.ask-pop-answer.prose ul,
+.ask-pop-answer.prose ol { margin-bottom: 0.6em; }
 .ask-pop-answer > :last-child { margin-bottom: 0; }
 .ask-pop-thinking,
 .ask-pop-error { color: var(--text2); font-size: 12.5px; }
@@ -124,5 +161,5 @@
     left: 50% !important;
     width: calc(100vw - 24px);
   }
-  .ask-pop-answer { max-height: 38vh; }
+  .ask-pop { max-height: 70vh !important; }
 }
