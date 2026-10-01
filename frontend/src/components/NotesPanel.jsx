@@ -10,6 +10,7 @@ import { makeMdComponents, makeCodeStyle, katexOptions } from './MdMessage'
 import CodeBlock from './CodeBlock'
 import FileTree, { buildTree, ancestorsOf } from './FileTree'
 import AskPopover from './AskPopover'
+import PdfView from './PdfView'
 import './NotesPanel.css'
 
 const TREE_MIN = 160
@@ -128,18 +129,18 @@ export default function NotesPanel() {
   useEffect(() => {
     if (!selectedNote) return
     let cancelled = false
-    let objectUrl = null
     setLoading(true)
     ;(async () => {
       try {
         const q = encodeURIComponent(selectedNote)
         if (/\.pdf$/i.test(selectedNote)) {
-          // The viewer needs the file itself. Fetched as a blob so the token
-          // travels in a header rather than in the <iframe> URL.
+          // Bytes, not a blob URL: the pages are rasterised by pdf.js rather
+          // than handed to the browser's viewer, because iOS renders only the
+          // first page of a PDF in an <iframe> and offers no way past it.
           const res = await fetch(`${API_BASE}/v1/notes/file?path=${q}`, { headers: headers() })
           if (!res.ok) throw new Error(`HTTP ${res.status}`)
-          objectUrl = URL.createObjectURL(await res.blob())
-          if (!cancelled) setDoc({ kind: 'pdf', url: objectUrl })
+          const buf = await res.arrayBuffer()
+          if (!cancelled) setDoc({ kind: 'pdf', data: buf })
           return
         }
         const res = await fetch(`${API_BASE}/v1/notes/read?path=${q}`, { headers: headers() })
@@ -152,10 +153,7 @@ export default function NotesPanel() {
         if (!cancelled) setLoading(false)
       }
     })()
-    return () => {
-      cancelled = true
-      if (objectUrl) URL.revokeObjectURL(objectUrl)
-    }
+    return () => { cancelled = true }
   }, [selectedNote])
 
   return (
@@ -203,7 +201,7 @@ export default function NotesPanel() {
             {loading ? (
               <p style={{ color: 'var(--text2)' }}>Loading...</p>
             ) : doc?.kind === 'pdf' ? (
-              <iframe className="note-pdf" src={doc.url} title={selectedNote} />
+              <PdfView data={doc.data} title={selectedNote.split('/').pop()} />
             ) : doc?.kind === 'text' ? (
               <div className="prose">
                 {doc.truncated && (
