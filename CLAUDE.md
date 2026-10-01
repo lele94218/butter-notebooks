@@ -195,7 +195,9 @@ JUPYTER_BASE_URL=/jupyter/  # must match --NotebookApp.base_url=
 - Backend venv: Homebrew Python 3.14 (`backend/.venv`)
 - Code sandbox venv: ComfyUI (`SANDBOX_PYTHON`, has torch/numpy/matplotlib)
 - Notes file scan uses `subprocess find` (not `rglob`) to avoid blocking asyncio under launchd TCC
-- Jupyter runs from ComfyUI venv (`$HOME/path/to/sandbox-venv/bin/jupyter-notebook`), port 8888, `--ip=0.0.0.0`. Must listen on all interfaces for Tailscale proxy to reach it. nginx strips `X-Frame-Options` and `Content-Security-Policy` headers to allow iframe embedding.
+- Jupyter runs from the ComfyUI venv (`$HOME/path/to/sandbox-venv/bin/jupyter-notebook`), port 8888, bound to the **Tailscale address** — not `0.0.0.0`. It only needs to be reachable by nginx over Tailscale; binding to every interface also exposed it to the LAN (and the macOS firewall is off). After editing the plist, `launchctl kickstart -k` is not enough — it reuses the cached job definition, so do a full `bootout` + `bootstrap`.
+- nginx strips `X-Frame-Options` and `Content-Security-Policy` so the iframe can embed it, rate-limits `/jupyter/login` only (limiting the whole route throttles the ~100 static chunks JupyterLab loads and breaks it), and logs `/jupyter/` without query strings.
+- The frontend exchanges the token at `/jupyter/login` via POST and lets the cookie authenticate the iframe. Never put the token in the iframe URL: nginx logs query strings, and this token is an arbitrary-code-execution credential.
 
 ## Known Issues / Gotchas
 

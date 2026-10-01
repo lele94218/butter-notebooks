@@ -3,6 +3,29 @@ import { API_BASE } from '../lib/constants'
 import { headers } from '../lib/api'
 import './NotebookPanel.css'
 
+
+// Log in to Jupyter the way its own form does: fetch the login page for the
+// _xsrf cookie, then POST the token in the body. Same origin, so the cookie it
+// sets is the one the iframe will use.
+async function jupyterLogin(baseUrl, token) {
+  const page = await fetch(`${baseUrl}login`, { credentials: 'include' })
+  const html = await page.text()
+  const xsrf =
+    (html.match(/name="_xsrf"\s+value="([^"]+)"/) || [])[1] ||
+    (document.cookie.match(/(?:^|;\s*)_xsrf=([^;]+)/) || [])[1] ||
+    ''
+  const body = new URLSearchParams({ _xsrf: xsrf, password: token })
+  const res = await fetch(`${baseUrl}login`, {
+    method: 'POST',
+    credentials: 'include',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body,
+    redirect: 'manual',
+  })
+  // 302 is the success path; an opaque redirect reads as 0 to fetch.
+  if (res.status >= 400) throw new Error(`Jupyter login failed (${res.status})`)
+}
+
 export default function NotebookPanel() {
   const [state, setState] = useState({ status: 'loading', url: null, error: null })
   const [iframeLoaded, setIframeLoaded] = useState(false)
@@ -20,8 +43,12 @@ export default function NotebookPanel() {
           return
         }
         const { token, base_url } = await res.json()
-        const url = `${base_url}lab?token=${token}`
-        setState({ status: 'ready', url, error: null })
+        // Exchange the token for Jupyter's session cookie before the iframe
+        // loads. Putting it in the iframe URL (?token=…) worked, but nginx logs
+        // query strings in full, so every visit wrote a credential that grants
+        // arbitrary code execution into the access log.
+        await jupyterLogin(base_url, token)
+        setState({ status: 'ready', url: `${base_url}lab`, error: null })
       } catch (e) {
         setState({ status: 'error', url: null, error: e.message })
       }
