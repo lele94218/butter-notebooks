@@ -31,10 +31,48 @@
   border-radius: 12px;
   background: var(--bg2);
   box-shadow: 0 8px 32px rgba(0, 0, 0, 0.42);
-  /* maxHeight comes from the component; hiding the overflow here lets the
+  /* The height comes from the component; hiding the overflow here lets the
      answer be the one part that scrolls. */
   overflow: hidden;
+  /* Blank areas and the quote act as the drag handle. */
+  cursor: move;
 }
+/* The parts that aren't a handle. */
+.ask-pop input,
+.ask-pop button,
+.ask-pop select,
+.ask-pop-answer { cursor: auto; }
+.ask-pop button,
+.ask-pop select { cursor: pointer; }
+.ask-pop-input { cursor: text; }
+
+/* Bottom-right grip: drags width and height, double-click goes back to auto. */
+.ask-pop-resizer {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  width: 16px;
+  height: 16px;
+  cursor: nwse-resize;
+}
+.ask-pop-resizer::after {
+  content: '';
+  position: absolute;
+  right: 3px;
+  bottom: 3px;
+  width: 7px;
+  height: 7px;
+  border-right: 2px solid var(--text3);
+  border-bottom: 2px solid var(--text3);
+  opacity: 0.6;
+}
+.ask-pop-resizer:hover::after { opacity: 1; border-color: var(--accent); }
+
+/* While a gesture runs, keep the pointer from selecting text or hovering rows. */
+body.is-ask-moving,
+body.is-ask-resizing { user-select: none; }
+body.is-ask-moving { cursor: move; }
+body.is-ask-resizing { cursor: nwse-resize; }
 
 /* The passage being asked about. Capped so a long selection doesn't push the
    input and the answer off screen. */

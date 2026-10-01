@@ -20,6 +20,7 @@ const ASK_MODELS = [
   'claude-haiku-4-5-20251001',
 ]
 const ASK_MODEL_KEY = 'butter_ask_model'
+const ASK_SIZE_KEY = 'butter_ask_size'
 
 // One tap for the things asked most often. The label is what the button shows;
 // the prompt is what actually gets sent.
@@ -84,7 +85,81 @@ export default function AskPopover({ quote, notePath, anchor, onClose }) {
   const inputRef = useRef(null)
   const boxRef = useRef(null)
 
+  // The box opens at the selection, but can be dragged anywhere and resized.
+  // Size sticks between uses; position doesn't, since each question starts from
+  // a different place on the page.
+  const [pos, setPos] = useState(() => ({ top: anchor.top, left: anchor.left }))
+  const [size, setSize] = useState(() => {
+    try {
+      const v = JSON.parse(localStorage.getItem(ASK_SIZE_KEY) || 'null')
+      if (v && v.w && v.h) return v
+    } catch {}
+    return null
+  })
+  useEffect(() => {
+    if (size) { try { localStorage.setItem(ASK_SIZE_KEY, JSON.stringify(size)) } catch {} }
+  }, [size])
+
+  // Pointer-driven move/resize share one loop: capture the start, then clamp
+  // each move so the box can't be dropped off screen.
+  const startGesture = useCallback((mode) => (e) => {
+    if (e.button !== undefined && e.button !== 0) return
+    e.preventDefault()
+    const box = boxRef.current.getBoundingClientRect()
+    const x0 = e.clientX, y0 = e.clientY
+    const start = { top: box.top, left: box.left + box.width / 2, w: box.width, h: box.height }
+    const move = ev => {
+      const dx = ev.clientX - x0, dy = ev.clientY - y0
+      if (mode === 'move') {
+        const half = start.w / 2
+        setPos({
+          top: Math.min(window.innerHeight - 60, Math.max(4, start.top + dy)),
+          left: Math.min(window.innerWidth - half - 8, Math.max(half + 8, start.left + dx)),
+        })
+      } else {
+        // The box is centred on its left value, so it grows both ways — keep it
+        // on screen afterwards, or widening near an edge pushes it off.
+        const w = Math.min(window.innerWidth - 24, Math.max(320, Math.round(start.w + dx * 2)))
+        const h = Math.min(window.innerHeight - 24, Math.max(200, Math.round(start.h + dy)))
+        setSize({ w, h })
+        const half = w / 2
+        setPos(prev => ({
+          top: prev.top,
+          left: Math.min(window.innerWidth - half - 8, Math.max(half + 8, prev.left)),
+        }))
+      }
+    }
+    const stop = () => {
+      window.removeEventListener('pointermove', move)
+      window.removeEventListener('pointerup', stop)
+      document.body.classList.remove(mode === 'move' ? 'is-ask-moving' : 'is-ask-resizing')
+    }
+    document.body.classList.add(mode === 'move' ? 'is-ask-moving' : 'is-ask-resizing')
+    window.addEventListener('pointermove', move)
+    window.addEventListener('pointerup', stop)
+  }, [])
+
+  // Dragging starts anywhere that isn't a control or the answer — the answer
+  // has to stay selectable, and the quote scrolls.
+  const onBoxPointerDown = e => {
+    if (e.target.closest('input, button, select, textarea, .ask-pop-answer, .ask-pop-resizer')) return
+    startGesture('move')(e)
+  }
+
   useEffect(() => { inputRef.current?.focus() }, [])
+
+  // The anchor is wherever the selection was, which near an edge would put part
+  // of the box off screen. Nudge it in once it has been measured.
+  useEffect(() => {
+    const el = boxRef.current
+    if (!el) return
+    const r = el.getBoundingClientRect()
+    const half = r.width / 2
+    setPos(prev => ({
+      top: Math.min(window.innerHeight - 60, Math.max(4, prev.top)),
+      left: Math.min(window.innerWidth - half - 8, Math.max(half + 8, prev.left)),
+    }))
+  }, [size])
   useEffect(() => { localStorage.setItem(ASK_MODEL_KEY, model) }, [model])
 
   // Escape closes; a click outside does too, unless a run is in flight — losing
@@ -134,13 +209,15 @@ export default function AskPopover({ quote, notePath, anchor, onClose }) {
       ref={boxRef}
       className="ask-pop"
       style={{
-        top: anchor.top,
-        left: anchor.left,
-        // Bound by what's actually below the anchor, so a long answer scrolls
-        // inside the box instead of running off the bottom of the screen.
-        maxHeight: Math.max(240, window.innerHeight - anchor.top - 16),
+        top: pos.top,
+        left: pos.left,
+        ...(size ? { width: size.w, height: size.h } : {}),
+        // Without an explicit height, stop at the bottom of the screen so a long
+        // answer scrolls inside the box instead of running past it.
+        ...(size ? {} : { maxHeight: Math.max(240, window.innerHeight - pos.top - 16) }),
       }}
       onMouseDown={e => e.stopPropagation()}
+      onPointerDown={onBoxPointerDown}
     >
       <div className="ask-pop-quote">{quote}</div>
 
@@ -195,6 +272,12 @@ export default function AskPopover({ quote, notePath, anchor, onClose }) {
           )}
         </div>
       )}
+      <div
+        className="ask-pop-resizer"
+        onPointerDown={startGesture('resize')}
+        onDoubleClick={() => setSize(null)}
+        title="Drag to resize · double-click to reset"
+      />
     </div>
   )
 }
