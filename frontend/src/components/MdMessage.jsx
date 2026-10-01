@@ -5,26 +5,25 @@ import remarkGfm from 'remark-gfm'
 import rehypeKatex from 'rehype-katex'
 import { oneDark, oneLight } from 'react-syntax-highlighter/dist/esm/styles/prism'
 import { ThemeContext } from '../lib/theme'
-import { API_BASE } from '../lib/constants'
-import { getToken } from '../lib/api'
 import CodeBlock from './CodeBlock'
 import ZoomableImg from './ImageViewer'
+import AuthImage from './AuthImage'
 
 // Rewrite markdown refs to a local image file → the served /v1/img URL so the
 // image renders (mirrors the backend shim). Handles `![alt](path)` and upgrades
 // `[alt](path)` links; supports file:// and <angle-bracketed paths with spaces>.
 // The backend /v1/img endpoint enforces existence + allowed-root; here we only
-// rewrite the URL. Token comes from localStorage (same as the web app auth).
+// rewrite the URL. No token in the URL — nginx logs query strings in full, so
+// embedding it published the credential on every image request. These are
+// fetched as blobs with an Authorization header instead (see AuthImage).
 const LOCAL_IMG_RE = /!?(\[[^\]]*\]\(\s*)(?:<(?:file:\/\/)?(\/[^>]+?\.(?:png|jpe?g|gif|webp|bmp))\s*>|(?:file:\/\/)?(\/(?:[^)\s<>]|%20)+\.(?:png|jpe?g|gif|webp|bmp)))(\s*\))/gi
 
 function rewriteLocalImages(text) {
   if (!text || text.indexOf('](') === -1) return text
-  const token = getToken()
   return text.replace(LOCAL_IMG_RE, (full, open, anglePath, barePath, close) => {
     const path = (anglePath || barePath || '').trim()
     const enc = encodeURIComponent(path).replace(/%2F/g, '/')
-    const url = `${API_BASE}/v1/img?p=${enc}&t=${encodeURIComponent(token)}`
-    return '!' + open + url + close
+    return '!' + open + `/v1/img?p=${enc}` + close
   })
 }
 
@@ -65,8 +64,14 @@ function makeMdComponents(theme) {
       return <a href={href} target="_blank" rel="noopener noreferrer">{children}</a>
     },
     img({ src, alt }) {
-      return <ZoomableImg src={src} alt={alt || ''}
-        style={{ maxWidth: '100%', height: 'auto', borderRadius: 8, display: 'block' }} />
+      const style = { maxWidth: '100%', height: 'auto', borderRadius: 8, display: 'block' }
+      // Our own image route needs the auth header, so it goes through AuthImage
+      // (which fetches a blob and renders it zoomable). Anything else is a
+      // plain remote URL.
+      if (typeof src === 'string' && src.startsWith('/v1/img')) {
+        return <AuthImage url={src} alt={alt || ''} style={style} />
+      }
+      return <ZoomableImg src={src} alt={alt || ''} style={style} />
     },
     table({ children }) {
       return <div className="table-scroll"><table>{children}</table></div>

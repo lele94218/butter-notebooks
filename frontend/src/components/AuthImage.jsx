@@ -3,7 +3,7 @@ import { API_BASE } from '../lib/constants'
 import { headers } from '../lib/api'
 import ZoomableImg from './ImageViewer'
 
-export default function AuthImage({ url, className, alt }) {
+export default function AuthImage({ url, className, alt, style }) {
   const [src, setSrc] = useState(null)
   useEffect(() => {
     if (!url) return
@@ -23,5 +23,5 @@ export default function AuthImage({ url, className, alt }) {
     }
   }, [url])
   if (!src) return <div className={`${className || ''} msg-image--loading`} />
-  return <ZoomableImg src={src} className={className} alt={alt} />
+  return <ZoomableImg src={src} className={className} alt={alt} style={style} />
 }

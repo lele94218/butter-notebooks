@@ -4,6 +4,9 @@ import asyncio
 import base64
 import json
 import logging
+import hashlib
+import hmac
+import time as _time
 import mimetypes
 import os
 import tempfile
@@ -65,7 +68,7 @@ def _load_convs_for_migration() -> dict:
 def verify_token(authorization: Optional[str]):
     if not authorization or not authorization.startswith("Bearer "):
         raise HTTPException(status_code=401, detail="Missing token")
-    if authorization[7:] != API_TOKEN:
+    if not hmac.compare_digest(authorization[7:], API_TOKEN):
         raise HTTPException(status_code=403, detail="Invalid token")
 
 
@@ -136,7 +139,9 @@ app.add_middleware(
     # app/webview origin we can't enumerate. The regex echoes the caller's origin
     # back, which (unlike "*") is compatible with allow_credentials.
     allow_origin_regex=".*",
-    allow_credentials=True,
+    # Nothing here uses cookies — auth is the Bearer token — so reflecting an
+    # arbitrary origin *and* allowing credentials would be a footgun for no gain.
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -1639,7 +1644,9 @@ def _img_under_allowed(path: Path) -> bool:
 
 def _img_serve_url(abspath: str) -> str:
     import urllib.parse
-    return f"{PUBLIC_BASE_URL}/v1/img?p={urllib.parse.quote(abspath)}&t={urllib.parse.quote(API_TOKEN)}"
+    exp = int(_time.time()) + IMG_URL_TTL
+    q = urllib.parse.quote(abspath)
+    return f"{PUBLIC_BASE_URL}/v1/img?p={q}&e={exp}&s={_img_sign(abspath, exp)}"
 
 
 def _rewrite_md_images(text: str) -> str:
@@ -1675,14 +1682,47 @@ def _safe_emit_len(buf: str) -> int:
     return len(buf)          # '![…' that can't become an image → safe
 
 
+IMG_URL_TTL = 7 * 24 * 3600   # a transcript stays readable for a week
+
+
+def _img_sign(path: str, exp: int) -> str:
+    """Sign one path + expiry with the API token as the key.
+
+    The URL used to carry the API token itself (?t=), which nginx then wrote to
+    its access log in full — one image request published the credential in
+    plaintext. A signature is scoped to a single file and expires, so a leaked
+    URL is worth far less than the token was.
+    """
+    msg = f"{path}:{exp}".encode()
+    return hmac.new(API_TOKEN.encode(), msg, hashlib.sha256).hexdigest()[:32]
+
+
 @app.get("/v1/img")
 @limiter.limit("120/minute")
-async def serve_image(request: Request, p: str, t: str = ""):
+async def serve_image(
+    request: Request,
+    p: str,
+    e: int = 0,
+    s: str = "",
+    authorization: Optional[str] = Header(None),
+):
     """Serve an agent-produced image so a markdown <img src> works in clients
-    like Chatbox. Token via ?t= (an <img> can't send an auth header). Only image
-    files under allowed roots are served."""
-    if t != API_TOKEN:
-        raise HTTPException(status_code=403, detail="bad token")
+    like Chatbox.
+
+    Two ways in: an Authorization header (the web app fetches these as blobs),
+    or a signed, expiring query (?e=&s=) for clients that can only put a URL in
+    an <img>. The raw token is deliberately not accepted — see _img_sign.
+    """
+    authed = False
+    if authorization and authorization.startswith("Bearer "):
+        authed = hmac.compare_digest(authorization[7:], API_TOKEN)
+    if not authed:
+        if not s or not e:
+            raise HTTPException(status_code=401, detail="missing credentials")
+        if e < int(_time.time()):
+            raise HTTPException(status_code=403, detail="link expired")
+        if not hmac.compare_digest(s, _img_sign(p, e)):
+            raise HTTPException(status_code=403, detail="bad signature")
     try:
         path = Path(p).resolve()
     except Exception:

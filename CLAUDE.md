@@ -106,6 +106,42 @@ The chat backend runs one of two CLIs, chosen by the request's `model`. The fron
 - **Images**: `GET /v1/img?p=<abs>&t=<API_TOKEN>` serves image files under allowed roots (`$HOME` + `/tmp` + `/private/tmp`, image-only); token via query so a markdown `<img>` works. The shim rewrites **markdown images only** — `![alt](/local/path)` or `![alt](file:///…)` → `![alt](<served url>)` (`_rewrite_md_images`); bare paths in prose are left alone. Streaming holds back a forming image markdown (`_safe_emit_len`) until complete, then rewrites in place (no broken/duplicate image). The agent still has to actually produce the file. `PUBLIC_BASE_URL` env sets the public host.
 - **Caveat**: no resume. iOS backgrounding drops the connection → the turn fails with no recovery (unlike the web app's `/v1/chat`, which persists + resumes). Use the web app for long turns.
 
+## Secrets and redaction (the repo is public-facing)
+
+History was rewritten on 2026-10-01 to strip the real host, IPs, home paths and
+an API token that had been committed. Nothing tracked here may contain:
+
+| Never commit | Use instead |
+| --- | --- |
+| The real domain | `your-site.example.com` |
+| VPS / Tailscale IPs, tailnet name | `YOUR.VPS.IP.ADDR`, `YOUR.MAC.TAILSCALE.IP`, `your-tailnet.ts.net` |
+| `/Users/<account>/…` | `$HOME/path/to/…` or `/Users/you/…` |
+| `API_TOKEN`, Jupyter token, any key | read it from the environment |
+
+Real values live in gitignored files: `backend/.env`, `deploy.env`,
+`frontend/.env*`, `LOCAL.md`. Tracked `*.example` counterparts carry the
+placeholders.
+
+**Scripts and test harnesses count.** The token leak came from a helper script
+with the live token in a default URL, not from application code. A tool that
+needs the host or the token reads it from the environment (or sources
+`deploy.env` / `backend/.env`) and **exits if it is missing** — never falls back
+to a hard-coded default.
+
+Before committing:
+
+```bash
+git diff --cached | grep -nE '<real-domain>|<vps-ip>|100\.[0-9]+\.|/Users/[a-z]+|API_TOKEN=[^$]'
+```
+
+Two things that are easy to miss:
+
+- `VITE_*` variables are **inlined into the bundle at build time**. A secret in
+  `frontend/.env.production` ships to every visitor. That is why the login
+  screen no longer takes a token from the environment at all.
+- Unauthenticated endpoints must disclose nothing about the host. `/health`
+  used to return `NOTES_ROOT`, publishing an absolute path and the account name.
+
 ## Deploy
 
 ```bash
