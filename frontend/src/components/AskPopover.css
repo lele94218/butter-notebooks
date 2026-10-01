@@ -1,0 +1,128 @@
+/* The button that appears over a selection in a note. */
+.ask-chip {
+  position: fixed;
+  z-index: 60;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 10px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--bg2);
+  color: var(--text);
+  font-size: 12px;
+  cursor: pointer;
+  box-shadow: 0 3px 14px rgba(0, 0, 0, 0.3);
+  transform: translateX(-50%);
+  white-space: nowrap;
+}
+.ask-chip:hover { border-color: var(--accent); color: var(--accent); }
+
+.ask-pop {
+  position: fixed;
+  z-index: 61;
+  width: min(520px, calc(100vw - 32px));
+  transform: translateX(-50%);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--bg2);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.42);
+}
+
+/* The passage being asked about. Capped so a long selection doesn't push the
+   input and the answer off screen. */
+.ask-pop-quote {
+  max-height: 84px;
+  overflow-y: auto;
+  padding-left: 9px;
+  border-left: 2px solid var(--accent);
+  color: var(--text2);
+  font-size: 12.5px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.ask-pop-row { display: flex; gap: 8px; }
+
+.ask-pop-input {
+  flex: 1;
+  min-width: 0;
+  padding: 7px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg);
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+}
+.ask-pop-input:focus { outline: none; border-color: var(--text3); }
+
+.ask-pop-btn {
+  flex-shrink: 0;
+  padding: 0 14px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text2);
+  font-size: 13px;
+  cursor: pointer;
+}
+.ask-pop-btn:hover { color: var(--text); border-color: var(--text3); }
+.ask-pop-btn--go { border-color: var(--accent); color: var(--accent); }
+
+.ask-pop-foot {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11.5px;
+  color: var(--text3);
+}
+.ask-pop-model {
+  padding: 2px 6px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--text2);
+  font-size: 11.5px;
+  cursor: pointer;
+}
+.ask-pop-hint { flex: 1; opacity: 0.8; }
+.ask-pop-close {
+  background: none;
+  border: none;
+  color: var(--text3);
+  font-size: 13px;
+  cursor: pointer;
+  padding: 0 2px;
+}
+.ask-pop-close:hover { color: var(--text); }
+
+.ask-pop-answer {
+  max-height: 46vh;
+  overflow-y: auto;
+  padding-top: 8px;
+  border-top: 1px solid var(--border);
+  font-size: 13.5px;
+}
+.ask-pop-answer > :last-child { margin-bottom: 0; }
+.ask-pop-thinking,
+.ask-pop-error { color: var(--text2); font-size: 12.5px; }
+.ask-pop-error { color: #d05a5a; word-break: break-word; }
+
+/* Touch: selection plus a floating chip is fiddly, and this is meant for a
+   desktop browser. Keep the popover usable if it is opened, but anchor it to
+   the bottom of the screen rather than to the selection. */
+@media (max-width: 600px) {
+  .ask-pop {
+    top: auto !important;
+    bottom: calc(12px + env(safe-area-inset-bottom));
+    left: 50% !important;
+    width: calc(100vw - 24px);
+  }
+  .ask-pop-answer { max-height: 38vh; }
+}

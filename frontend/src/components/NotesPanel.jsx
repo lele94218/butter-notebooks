@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useCallback, useContext } from 'react'
+import { useState, useEffect, useMemo, useCallback, useContext, useRef } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkMath from 'remark-math'
 import remarkGfm from 'remark-gfm'
@@ -9,6 +9,7 @@ import { ThemeContext } from '../lib/theme'
 import { makeMdComponents, makeCodeStyle, katexOptions } from './MdMessage'
 import CodeBlock from './CodeBlock'
 import FileTree, { buildTree, ancestorsOf } from './FileTree'
+import AskPopover from './AskPopover'
 import './NotesPanel.css'
 
 const TREE_MIN = 160
@@ -59,6 +60,10 @@ export default function NotesPanel() {
   }, [openDirs])
   // { kind: 'markdown' | 'text' | 'pdf', content, language, truncated, url }
   const [doc, setDoc] = useState(null)
+  // Text selected in the note, and where to float the "Ask AI" chip.
+  const [sel, setSel] = useState(null)      // { quote, top, left }
+  const [asking, setAsking] = useState(null)
+  const contentRef = useRef(null)
   const [loading, setLoading] = useState(false)
   // On phones the tree is an overlay drawer, so start collapsed (content first).
   const [treeOpen, setTreeOpen] = useState(
@@ -73,6 +78,30 @@ export default function NotesPanel() {
   }, [])
 
   useEffect(() => { refreshNotes() }, [])
+
+  // A selection inside the note offers a quick question about it. Driven by
+  // pointerup rather than selectionchange so the chip appears once, where the
+  // drag ended, instead of jittering along with it.
+  useEffect(() => {
+    const onUp = () => {
+      // Let the browser settle the selection before reading it.
+      setTimeout(() => {
+        const s = window.getSelection()
+        const text = s ? s.toString().trim() : ''
+        const host = contentRef.current
+        if (!text || !s.rangeCount || !host) { setSel(null); return }
+        if (!host.contains(s.anchorNode) || !host.contains(s.focusNode)) { setSel(null); return }
+        const r = s.getRangeAt(0).getBoundingClientRect()
+        if (!r.width && !r.height) { setSel(null); return }
+        setSel({ quote: text, top: Math.max(8, r.top - 38), left: r.left + r.width / 2 })
+      }, 0)
+    }
+    document.addEventListener('pointerup', onUp)
+    return () => document.removeEventListener('pointerup', onUp)
+  }, [])
+
+  // A new file means the old selection is meaningless.
+  useEffect(() => { setSel(null); setAsking(null) }, [selectedNote])
 
   const revealPath = useCallback((f) => {
     const anc = ancestorsOf(f)
@@ -170,7 +199,7 @@ export default function NotesPanel() {
             <p>Pick a file from the tree</p>
           </div>
         ) : (
-          <div className={`note-content ${doc?.kind === 'pdf' ? 'note-content--pdf' : ''}`}>
+          <div ref={contentRef} className={`note-content ${doc?.kind === 'pdf' ? 'note-content--pdf' : ''}`}>
             {loading ? (
               <p style={{ color: 'var(--text2)' }}>Loading...</p>
             ) : doc?.kind === 'pdf' ? (
@@ -196,6 +225,26 @@ export default function NotesPanel() {
           </div>
         )}
       </div>
+
+      {sel && !asking && (
+        <button
+          className="ask-chip"
+          style={{ top: sel.top, left: sel.left }}
+          onMouseDown={e => e.preventDefault()}   /* keep the selection alive */
+          onClick={() => { setAsking({ quote: sel.quote, top: sel.top, left: sel.left }); setSel(null) }}
+        >
+          {'\u2726'} Ask AI
+        </button>
+      )}
+
+      {asking && (
+        <AskPopover
+          quote={asking.quote}
+          notePath={selectedNote}
+          anchor={{ top: Math.min(asking.top + 44, window.innerHeight - 320), left: asking.left }}
+          onClose={() => setAsking(null)}
+        />
+      )}
     </div>
   )
 }
