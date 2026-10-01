@@ -7,7 +7,8 @@
 import { chromium } from 'playwright'
 import { mkdirSync } from 'fs'
 
-const URL = process.argv[2] || 'https://your-site.example.com'
+const URL = process.argv[2] || process.env.SITE_URL
+if (!URL) { console.error('set SITE_URL or pass the url as an argument'); process.exit(2) }
 const OUT = 'docs/screenshots'
 mkdirSync(OUT, { recursive: true })
 

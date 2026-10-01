@@ -12,7 +12,15 @@
 # Requires: Xcode + an iOS Simulator runtime.
 set -e
 
-URL="${1:-https://your-site.example.com/?t=your-secret-token}"
+# Site + token come from the environment or the repo's gitignored config —
+# never hard-coded, since the URL carries the API token.
+REPO="$(cd "$(dirname "$0")/../.." && pwd)"
+[ -f "$REPO/deploy.env" ] && . "$REPO/deploy.env"
+[ -z "$API_TOKEN" ] && [ -f "$REPO/backend/.env" ] && \
+  API_TOKEN=$(grep -E "^API_TOKEN=" "$REPO/backend/.env" | cut -d= -f2- | tr -d "\"'")
+: "${SITE_URL:?set SITE_URL (e.g. in deploy.env)}"
+: "${API_TOKEN:?set API_TOKEN}"
+URL="${1:-$SITE_URL}"
 BUNDLE=dev.butternotebooks.probe
 APPDIR="$(cd "$(dirname "$0")" && pwd)/../.ios-probe"
 DEVNAME="butter-test"
@@ -31,7 +39,7 @@ sleep 3
 xcrun simctl terminate "$DEV" "$BUNDLE" 2>/dev/null || true
 xcrun simctl install "$DEV" "$APPDIR/BWK.app"
 OUT=$(mktemp)
-BWK_URL="$URL" xcrun simctl launch --console-pty "$DEV" "$BUNDLE" > "$OUT" 2>&1 &
+SIMCTL_CHILD_BWK_URL="$URL" SIMCTL_CHILD_BWK_TOKEN="$API_TOKEN" xcrun simctl launch --console-pty "$DEV" "$BUNDLE" > "$OUT" 2>&1 &
 LAUNCH_PID=$!
 for _ in $(seq 1 30); do grep -q PROBE_RESULT "$OUT" && break; sleep 1; done
 kill $LAUNCH_PID 2>/dev/null || true

@@ -10,6 +10,7 @@ available from a phone without exposing the machine to the internet.
 [![FastAPI](https://img.shields.io/badge/FastAPI-009688?logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com/)
 [![React](https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=black)](https://react.dev/)
 [![Vite](https://img.shields.io/badge/Vite-646CFF?logo=vite&logoColor=white)](https://vitejs.dev/)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 
 ![Chat with streaming Markdown, KaTeX and syntax highlighting](docs/screenshots/chat.png)
 
@@ -223,3 +224,7 @@ reports the same safe areas and viewport as a home-screen app.
   and currently off; the panel and its routes are intact.
 
 See [CLAUDE.md](CLAUDE.md) for the full operational guide.
+
+## License
+
+[MIT](LICENSE)

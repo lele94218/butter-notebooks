@@ -8,8 +8,10 @@
 // insets iOS reports in full-bleed mode.
 import { chromium } from 'playwright'
 
-const URL = process.argv[2] || 'https://your-site.example.com'
-const TOKEN = process.env.API_TOKEN || 'your-secret-token'
+const URL = process.argv[2] || process.env.SITE_URL
+if (!URL) { console.error('set SITE_URL or pass the url as an argument'); process.exit(2) }
+const TOKEN = process.env.API_TOKEN
+if (!TOKEN) { console.error('set API_TOKEN'); process.exit(2) }
 
 // iPhone 15 Pro, portrait, full-bleed standalone
 const VW = 393, VH = 852

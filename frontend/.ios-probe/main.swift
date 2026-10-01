@@ -8,9 +8,14 @@ class VC: UIViewController {
     let cfg = WKWebViewConfiguration()
     // Optional: open a specific conversation (BWK_CONV) so a probe can act on
     // its contents — e.g. tapping an image to check the viewer.
+    // Auth and the conversation to open are seeded into localStorage rather
+    // than passed in the URL, so the token never lands in history or a log.
     let conv = ProcessInfo.processInfo.environment["BWK_CONV"] ?? ""
-    let seed = conv.isEmpty ? "" :
-      "try { localStorage.setItem('butter_active_conv', '\(conv)'); } catch (e) {}"
+    let token = ProcessInfo.processInfo.environment["BWK_TOKEN"] ?? ""
+    var seedParts: [String] = []
+    if !token.isEmpty { seedParts.append("localStorage.setItem('butter_auth_token', '\(token)');") }
+    if !conv.isEmpty { seedParts.append("localStorage.setItem('butter_active_conv', '\(conv)');") }
+    let seed = seedParts.isEmpty ? "" : "try { " + seedParts.joined(separator: " ") + " } catch (e) {}"
     // Report display-mode:standalone + navigator.standalone like a home-screen app
     let js = """
     (function(){
@@ -54,9 +59,14 @@ class VC: UIViewController {
       web.leadingAnchor.constraint(equalTo: view.leadingAnchor),
       web.trailingAnchor.constraint(equalTo: view.trailingAnchor),
     ])
-    let url = ProcessInfo.processInfo.environment["BWK_URL"]
-      ?? "https://your-site.example.com/?t=your-secret-token"
-    web.load(URLRequest(url: URL(string: url)!))
+    // Supplied by check-ios.sh as SIMCTL_CHILD_BWK_URL — never hard-coded here,
+    // since it carries the API token.
+    guard let raw = ProcessInfo.processInfo.environment["BWK_URL"],
+          let target = URL(string: raw) else {
+      print("PROBE_RESULT: {\"error\":\"BWK_URL not set\"}")
+      return
+    }
+    web.load(URLRequest(url: target))
     // After load: perform the mode's action, then dump the geometry.
     // BWK_MODE reaches the app as SIMCTL_CHILD_BWK_MODE when launched by simctl.
     DispatchQueue.main.asyncAfter(deadline: .now() + 6) {
