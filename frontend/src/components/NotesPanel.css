@@ -6,7 +6,8 @@
 }
 
 .notes-filetree {
-  width: 200px;
+  position: relative;
+  width: var(--tree-w, 200px);
   min-width: 160px;
   border-right: 1px solid var(--border);
   display: flex;
@@ -178,4 +179,32 @@
   margin-bottom: 10px;
   font-size: 12px;
   color: var(--text2);
+}
+
+/* Drag handle on the tree's right edge. Sits just outside the border so it is
+   grabbable without stealing clicks from the rows. */
+.notes-filetree-resizer {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  right: -3px;
+  width: 7px;
+  cursor: col-resize;
+  z-index: 5;
+}
+.notes-filetree-resizer:hover::after,
+body.is-resizing .notes-filetree-resizer::after {
+  content: '';
+  position: absolute;
+  inset: 0 3px;
+  background: var(--accent);
+  opacity: 0.55;
+}
+/* While dragging, don't let the pointer select text or hover rows. */
+body.is-resizing { cursor: col-resize; user-select: none; }
+body.is-resizing .tree-row { pointer-events: none; }
+
+@media (max-width: 600px) {
+  /* The tree is a drawer here; resizing it makes no sense. */
+  .notes-filetree-resizer { display: none; }
 }

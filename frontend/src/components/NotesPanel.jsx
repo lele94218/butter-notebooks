@@ -8,8 +8,11 @@ import { headers } from '../lib/api'
 import { ThemeContext } from '../lib/theme'
 import { makeMdComponents, makeCodeStyle, katexOptions } from './MdMessage'
 import CodeBlock from './CodeBlock'
-import FileTree, { buildTree } from './FileTree'
+import FileTree, { buildTree, ancestorsOf } from './FileTree'
 import './NotesPanel.css'
+
+const TREE_MIN = 160
+const TREE_MAX = 480
 
 export default function NotesPanel() {
   const theme = useContext(ThemeContext)
@@ -18,7 +21,42 @@ export default function NotesPanel() {
 
   const [notes, setNotes] = useState([])
   const [selectedNote, setSelectedNote] = useState(() => localStorage.getItem('butter_last_note') || null)
-  const [openDirs, setOpenDirs] = useState({})
+  // Pane width, dragged by the handle on its right edge and remembered. Set as
+  // a custom property rather than an inline width so the phone media query
+  // (which turns the tree into a drawer) still wins.
+  const [treeWidth, setTreeWidth] = useState(() => {
+    const v = parseInt(localStorage.getItem('butter_tree_width') || '', 10)
+    return Number.isFinite(v) ? Math.min(TREE_MAX, Math.max(TREE_MIN, v)) : 200
+  })
+  useEffect(() => {
+    try { localStorage.setItem('butter_tree_width', String(treeWidth)) } catch {}
+  }, [treeWidth])
+
+  const startResize = useCallback((e) => {
+    e.preventDefault()
+    const startX = e.clientX
+    const startW = e.currentTarget.parentElement.getBoundingClientRect().width
+    const move = ev => setTreeWidth(
+      Math.min(TREE_MAX, Math.max(TREE_MIN, Math.round(startW + ev.clientX - startX)))
+    )
+    const stop = () => {
+      window.removeEventListener('pointermove', move)
+      window.removeEventListener('pointerup', stop)
+      document.body.classList.remove('is-resizing')
+    }
+    document.body.classList.add('is-resizing')
+    window.addEventListener('pointermove', move)
+    window.addEventListener('pointerup', stop)
+  }, [])
+
+  // Open/closed per directory path, remembered across reloads. Absent means
+  // closed (see FileTree), so a fresh vault opens tidy.
+  const [openDirs, setOpenDirs] = useState(() => {
+    try { return JSON.parse(localStorage.getItem('butter_open_dirs') || '{}') } catch { return {} }
+  })
+  useEffect(() => {
+    try { localStorage.setItem('butter_open_dirs', JSON.stringify(openDirs)) } catch {}
+  }, [openDirs])
   // { kind: 'markdown' | 'text' | 'pdf', content, language, truncated, url }
   const [doc, setDoc] = useState(null)
   const [loading, setLoading] = useState(false)
@@ -36,8 +74,23 @@ export default function NotesPanel() {
 
   useEffect(() => { refreshNotes() }, [])
 
+  const revealPath = useCallback((f) => {
+    const anc = ancestorsOf(f)
+    if (!anc.length) return
+    setOpenDirs(prev => {
+      const next = { ...prev }
+      for (const d of anc) next[d] = true
+      return next
+    })
+  }, [])
+
+  // Keep the restored file visible — otherwise it sits inside folders that are
+  // now closed by default and the tree looks empty of it.
+  useEffect(() => { if (selectedNote) revealPath(selectedNote) }, [])
+
   const selectNote = (f) => {
     setSelectedNote(f)
+    revealPath(f)
     localStorage.setItem('butter_last_note', f)
     // On phones the tree is an overlay — close it once a note is picked.
     if (window.matchMedia('(max-width: 600px)').matches) setTreeOpen(false)
@@ -80,19 +133,25 @@ export default function NotesPanel() {
     <div className="notes-layout">
       {treeOpen && <div className="notes-tree-backdrop" onClick={() => setTreeOpen(false)} />}
       {treeOpen && (
-        <div className="notes-filetree">
+        <div className="notes-filetree" style={{ '--tree-w': `${treeWidth}px` }}>
           <div className="notes-filetree-header">
             <span className="notes-filetree-title">Notes</span>
             <button className="notes-refresh-btn" onClick={refreshNotes} title="Refresh">&#8634;</button>
             <button className="notes-collapse-btn" onClick={() => setTreeOpen(false)} title="Collapse">&laquo;</button>
           </div>
+          <div
+            className="notes-filetree-resizer"
+            onPointerDown={startResize}
+            onDoubleClick={() => setTreeWidth(200)}
+            title="Drag to resize · double-click to reset"
+          />
           <div className="notes-filetree-list">
             <FileTree
               tree={buildTree(notes)}
               selectedNote={selectedNote}
               onSelect={selectNote}
               openDirs={openDirs}
-              toggleDir={key => setOpenDirs(prev => ({ ...prev, [key]: prev[key] === false ? true : false }))}
+              toggleDir={key => setOpenDirs(prev => ({ ...prev, [key]: !prev[key] }))}
             />
           </div>
         </div>

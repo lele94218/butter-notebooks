@@ -46,12 +46,22 @@ export function buildTree(paths) {
     const parts = p.split('/')
     let node = root
     for (let i = 0; i < parts.length - 1; i++) {
-      node[parts[i]] = node[parts[i]] || { __dir: true, __children: {} }
+      // Directories carry their full path too. Keying open/closed state on
+      // name+depth meant two folders of the same name at the same level shared
+      // one state — and one React key.
+      const dirPath = parts.slice(0, i + 1).join('/')
+      node[parts[i]] = node[parts[i]] || { __dir: true, __path: dirPath, __children: {} }
       node = node[parts[i]].__children
     }
     node[parts[parts.length - 1]] = { __dir: false, __path: p }
   }
   return root
+}
+
+// Every directory on the way down to a file, so the tree can reveal a selection.
+export function ancestorsOf(filePath) {
+  const parts = (filePath || '').split('/')
+  return parts.slice(0, -1).map((_, i) => parts.slice(0, i + 1).join('/'))
 }
 
 // Indent per level. The guide line for a level sits at the parent's icon column.
@@ -68,8 +78,10 @@ export default function FileTree({ tree, depth = 0, selectedNote, onSelect, open
         })
         .map(([name, node]) => {
           if (node.__dir) {
-            const key = name + depth
-            const open = openDirs[key] !== false
+            const key = node.__path
+            // Closed unless explicitly opened: expanding everything turned a
+            // 19-directory vault into a very long scroll.
+            const open = openDirs[key] === true
             return (
               <div key={key} className="tree-branch">
                 <div
