@@ -2,6 +2,8 @@
 
 **A self-hosted workspace for Claude and Codex — chat, notes and notebooks, reachable from any browser.**
 
+English · [简体中文](README.zh-CN.md)
+
 The agent CLIs run on a machine you own, with your files. A small VPS serves the
 frontend and proxies the API over a private network, so the workspace is
 available from a phone without exposing the machine to the internet.
