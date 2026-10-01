@@ -33,19 +33,23 @@ const ASK_PRESETS = [
 // Goes through the OpenAI-compatible endpoint on purpose: it runs the agent
 // without a session and writes nothing, so asking about a line of a note
 // doesn't leave a conversation behind.
-async function* askStream({ quote, question, notePath, model, signal }) {
-  const ask = question.trim() || 'Explain this.'
-  const prompt =
+// The passage and the note's path only need stating once; later turns are
+// plain follow-ups on top of it.
+function openingMessage(quote, notePath, ask) {
+  return (
     `From the note \`${notePath}\`:\n\n` +
     quote.split('\n').map(l => `> ${l}`).join('\n') +
     `\n\n${ask}\n\n` +
     `Answer briefly, about the quoted passage. Open the file if you need more context.`
+  )
+}
 
+async function* askStream({ messages, model, signal }) {
   const res = await fetch(`${API_BASE}/v1/chat/completions`, {
     method: 'POST',
     signal,
     headers: { ...headers(), 'Content-Type': 'application/json' },
-    body: JSON.stringify({ model, stream: true, messages: [{ role: 'user', content: prompt }] }),
+    body: JSON.stringify({ model, stream: true, messages }),
   })
   if (!res.ok) throw new Error((await res.text().catch(() => '')) || `HTTP ${res.status}`)
 
@@ -78,9 +82,24 @@ export default function AskPopover({ quote, notePath, anchor, onClose }) {
   const [model, setModel] = useState(
     () => localStorage.getItem(ASK_MODEL_KEY) || ASK_DEFAULT_MODEL
   )
-  const [answer, setAnswer] = useState('')
-  const [state, setState] = useState('idle')   // idle | running | done | error
+  // The exchange lives here, not on the server: each turn resends the whole
+  // thing, which is what the stateless endpoint expects and why nothing is
+  // stored as a conversation.
+  const [turns, setTurns] = useState([])       // [{ q, a }]
+  const [state, setState] = useState('idle')   // idle | running | error
   const [error, setError] = useState('')
+  const threadRef = useRef(null)
+  // run() replays the exchange, but shouldn't be rebuilt on every streamed
+  // chunk, so it reads the turns through a ref.
+  const turnsRef = useRef(turns)
+  useEffect(() => { turnsRef.current = turns }, [turns])
+  // Follow the stream, unless the reader has scrolled up to re-read something.
+  useEffect(() => {
+    const el = threadRef.current
+    if (!el) return
+    const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 60
+    if (atBottom) el.scrollTop = el.scrollHeight
+  }, [turns])
   const abortRef = useRef(null)
   const inputRef = useRef(null)
   const boxRef = useRef(null)
@@ -142,7 +161,7 @@ export default function AskPopover({ quote, notePath, anchor, onClose }) {
   // Dragging starts anywhere that isn't a control or the answer — the answer
   // has to stay selectable, and the quote scrolls.
   const onBoxPointerDown = e => {
-    if (e.target.closest('input, button, select, textarea, .ask-pop-answer, .ask-pop-resizer')) return
+    if (e.target.closest('input, button, select, textarea, .ask-pop-thread, .ask-pop-resizer')) return
     startGesture('move')(e)
   }
 
@@ -181,20 +200,40 @@ export default function AskPopover({ quote, notePath, anchor, onClose }) {
   useEffect(() => () => abortRef.current?.abort(), [])
 
   const run = useCallback(async (override) => {
-    const ask = typeof override === 'string' ? override : question
+    const ask = (typeof override === 'string' ? override : question).trim() || 'Explain this.'
     abortRef.current?.abort()
     const ctl = new AbortController()
     abortRef.current = ctl
-    setAnswer('')
     setError('')
     setState('running')
+    setQuestion('')
+
+    // Replay the exchange so far. Only the first message carries the quote.
+    const history = []
+    turnsRef.current.forEach((t, i) => {
+      history.push({
+        role: 'user',
+        content: i === 0 ? openingMessage(quote, notePath, t.q) : t.q,
+      })
+      if (t.a) history.push({ role: 'assistant', content: t.a })
+    })
+    const messages = [
+      ...history,
+      {
+        role: 'user',
+        content: history.length ? ask : openingMessage(quote, notePath, ask),
+      },
+    ]
+
+    const index = turnsRef.current.length
+    setTurns(prev => [...prev, { q: ask, a: '' }])
     try {
-      for await (const piece of askStream({ quote, question: ask, notePath, model, signal: ctl.signal })) {
-        setAnswer(prev => prev + piece)
+      for await (const piece of askStream({ messages, model, signal: ctl.signal })) {
+        setTurns(prev => prev.map((t, i) => (i === index ? { ...t, a: t.a + piece } : t)))
       }
-      setState('done')
+      setState('idle')
     } catch (e) {
-      if (e.name === 'AbortError') return
+      if (e.name === 'AbortError') { setState('idle'); return }
       setError(e.message)
       setState('error')
     }
@@ -225,7 +264,7 @@ export default function AskPopover({ quote, notePath, anchor, onClose }) {
         <input
           ref={inputRef}
           className="ask-pop-input"
-          placeholder="Ask about this… (Enter to send)"
+          placeholder={turns.length ? 'Follow up… (Enter to send)' : 'Ask about this… (Enter to send)'}
           value={question}
           onChange={e => setQuestion(e.target.value)}
           onKeyDown={onKeyDown}
@@ -255,23 +294,31 @@ export default function AskPopover({ quote, notePath, anchor, onClose }) {
         <button className="ask-pop-close" onClick={() => { abortRef.current?.abort(); onClose() }}>✕</button>
       </div>
 
-      {(answer || state === 'running' || state === 'error') && (
-        <div className="ask-pop-answer prose">
-          {state === 'error' ? (
-            <p className="ask-pop-error">{error}</p>
-          ) : answer ? (
-            <ReactMarkdown
-              remarkPlugins={[remarkGfm, remarkMath]}
-              rehypePlugins={[[rehypeKatex, katexOptions]]}
-              components={mdComponents}
-            >
-              {answer}
-            </ReactMarkdown>
-          ) : (
-            <p className="ask-pop-thinking">Thinking…</p>
-          )}
+      {(turns.length > 0 || state === 'error') && (
+        <div className="ask-pop-thread" ref={threadRef}>
+          {turns.map((t, i) => (
+            <div className="ask-turn" key={i}>
+              {/* The first question is already implied by the quote above. */}
+              {i > 0 && <div className="ask-turn-q">{t.q}</div>}
+              {t.a ? (
+                <div className="ask-pop-answer prose">
+                  <ReactMarkdown
+                    remarkPlugins={[remarkGfm, remarkMath]}
+                    rehypePlugins={[[rehypeKatex, katexOptions]]}
+                    components={mdComponents}
+                  >
+                    {t.a}
+                  </ReactMarkdown>
+                </div>
+              ) : state === 'running' && i === turns.length - 1 ? (
+                <p className="ask-pop-thinking">Thinking…</p>
+              ) : null}
+            </div>
+          ))}
+          {state === 'error' && <p className="ask-pop-error">{error}</p>}
         </div>
       )}
+
       <div
         className="ask-pop-resizer"
         onPointerDown={startGesture('resize')}

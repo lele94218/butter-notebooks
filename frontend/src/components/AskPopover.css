@@ -41,7 +41,7 @@
 .ask-pop input,
 .ask-pop button,
 .ask-pop select,
-.ask-pop-answer { cursor: auto; }
+.ask-pop-thread { cursor: auto; }
 .ask-pop button,
 .ask-pop select { cursor: pointer; }
 .ask-pop-input { cursor: text; }
@@ -157,19 +157,28 @@ body.is-ask-resizing { cursor: nwse-resize; }
 }
 .ask-pop-close:hover { color: var(--text); }
 
-.ask-pop-answer {
+/* The thread is the scroller; each answer inside it just flows. */
+.ask-pop-thread {
   flex: 1;
   min-height: 0;
-  padding-top: 8px;
-  border-top: 1px solid var(--border);
-}
-/* .prose forces overflow: visible (it must not create a second scroll context
-   inside a note on iOS). Here it is the scroller, so this needs both classes to
-   win on specificity. */
-.ask-pop-answer.prose {
   overflow-y: auto;
   overscroll-behavior: contain;
+  padding-top: 8px;
+  border-top: 1px solid var(--border);
+  cursor: auto;
 }
+.ask-turn + .ask-turn {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px dashed var(--border);
+}
+/* The follow-up that produced the answer below it. */
+.ask-turn-q {
+  margin-bottom: 5px;
+  color: var(--text3);
+  font-size: 11.5px;
+}
+.ask-turn-q::before { content: '› '; opacity: 0.7; }
 /* .prose is sized for reading a full note (1rem/1.75rem) and its headings use
    rem, so they ignore a parent font-size. Restate the sizes in em so the whole
    answer scales down together. */
