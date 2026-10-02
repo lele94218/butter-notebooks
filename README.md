@@ -40,8 +40,18 @@ conversations still working.
 highlighting with copy buttons, tables, and images you can tap to view full
 size.
 
-**Notes.** Browse and read a Markdown vault (Obsidian or any folder) read-only,
-with the same renderer as chat.
+**Notes.** Browse a Markdown vault (Obsidian or any folder) read-only, with the
+same renderer as chat. PDFs are rendered page by page — iOS shows only the first
+page of one in an iframe, so pdf.js draws them instead — and source files open
+monospaced and syntax-highlighted.
+
+**Ask about what you're reading.** Select text in a note — or in a PDF, which
+carries a text layer for exactly this — and a question goes straight to an agent
+with the passage and the file's path attached, so it can open the file for more
+context. The answer arrives in a popover you can move and resize, and follow-ups
+continue the thread. Presets cover the usual asks; one walks the passage through
+the Feynman method and ends by asking you to restate it. None of this touches
+your conversations: it runs on the stateless endpoint, so nothing is stored.
 
 **Notebooks.** JupyterLab embedded in a tab, token-gated through the backend and
 reverse-proxied so files open inside the app.
@@ -63,6 +73,8 @@ requests.
 <td align="center"><em>Installed as a PWA on iOS</em></td>
 </tr>
 </table>
+
+![Asking about a selected passage without starting a conversation](docs/screenshots/ask.png)
 
 ## Architecture
 

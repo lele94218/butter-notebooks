@@ -7,9 +7,11 @@
 import { chromium } from 'playwright'
 import { mkdirSync } from 'fs'
 
-const URL = process.argv[2] || process.env.SITE_URL
-if (!URL) { console.error('set SITE_URL or pass the url as an argument'); process.exit(2) }
-const OUT = 'docs/screenshots'
+// Not named URL: that would shadow the global constructor used below.
+const SITE = process.argv[2] || process.env.SITE_URL
+if (!SITE) { console.error('set SITE_URL or pass the url as an argument'); process.exit(2) }
+// Repo root, not the frontend directory this is run from.
+const OUT = new URL('../../docs/screenshots/', import.meta.url).pathname
 mkdirSync(OUT, { recursive: true })
 
 const ASSISTANT = `Softmax turns a vector of scores into a probability distribution:
@@ -82,7 +84,32 @@ const FILES = [
   'reading/2026-week-11.md', 'reading/2026-week-12.md',
 ]
 
+// A canned Feynman-style answer, streamed back in OpenAI chunk format so the
+// popover renders exactly as it does against the real backend.
+const ASK_ANSWER = `把它想成一个**接话游戏**。
+
+给模型看半句话，它要猜下一个词最可能是什么 —— 像你听到"我太饿了，想吃一"就脱口而出"碗面"。
+训练就是把这个游戏玩上几万亿次，每猜错一次就微调一点点。
+
+两个检验理解的问题：
+
+1. 如果把开头换成"我太困了，想喝一"，你的猜测会怎样变化？为什么？
+2. 猜出来的句子读着通顺，就一定是**真的**吗？
+
+请你用自己的话复述一下：语言模型在做什么？`
+
+function sseChunks(text) {
+  const parts = text.match(/[\s\S]{1,24}/g) || []
+  return (
+    parts
+      .map(p => `data: ${JSON.stringify({ choices: [{ delta: { content: p } }] })}\n\n`)
+      .join('') + 'data: [DONE]\n\n'
+  )
+}
+
 async function mocked(ctx) {
+  await ctx.route('**/v1/chat/completions', r =>
+    r.fulfill({ contentType: 'text/event-stream', body: sseChunks(ASK_ANSWER) }))
   await ctx.route('**/v1/conversations*', r =>
     r.fulfill({ contentType: 'application/json', body: JSON.stringify({ conversations: CONVERSATIONS }) }))
   await ctx.route('**/v1/notes?*', r =>
@@ -111,7 +138,7 @@ async function shot(name, { width, height, mobile = false, prepare }) {
     localStorage.setItem('butter_active_conv', 'demo-1')
     localStorage.setItem('butter_theme', 'dark')
   })
-  await page.goto(URL, { waitUntil: 'networkidle' })
+  await page.goto(SITE, { waitUntil: 'networkidle' })
   await page.waitForTimeout(2200)
   if (prepare) await prepare(page)
   await page.screenshot({ path: `${OUT}/${name}.png` })
@@ -129,7 +156,32 @@ await shot('notes', {
     await p.waitForTimeout(1200)
   },
 })
-await shot('mobile', { width: 393, height: 852, mobile: true })
+await shot('ask', {
+  width: 1280, height: 700,
+  prepare: async (p) => {
+    await p.click('text=Notes')
+    await p.waitForTimeout(900)
+    await p.click('.tree-file >> nth=0').catch(() => {})
+    await p.waitForTimeout(1200)
+    // Select a line in the note, then open the popover on it.
+    const box = await p.evaluate(() => {
+      const host = document.querySelector('.note-content')
+      const el = [...host.querySelectorAll('*')]
+        .find(e => e.children.length === 0 && e.textContent.trim().length > 30)
+      const r = el.getBoundingClientRect()
+      return { x1: r.left + 2, y: r.top + r.height / 2, x2: r.left + Math.min(r.width - 2, 300) }
+    })
+    await p.mouse.move(box.x1, box.y)
+    await p.mouse.down()
+    await p.mouse.move(box.x2, box.y, { steps: 10 })
+    await p.mouse.up()
+    await p.waitForTimeout(400)
+    await p.click('.ask-chip')
+    await p.waitForTimeout(300)
+    await p.click('.ask-pop-preset:has-text("费曼讲解")')
+    await p.waitForTimeout(1500)
+  },
+})
 await shot('mobile-sidebar', {
   width: 393, height: 852, mobile: true,
   prepare: async (p) => { await p.click('.menu-btn'); await p.waitForTimeout(600) },
