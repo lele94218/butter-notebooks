@@ -1946,6 +1946,31 @@ async def _shim_follow(run: ShimRun):
         await run.tick.wait()
 
 
+@app.get("/v1/shim/runs")
+@limiter.limit("60/minute")
+async def shim_runs(request: Request, authorization: Optional[str] = Header(None)):
+    """What the shim is holding right now — which runs are in flight, which
+    finished, and how much of each answer is buffered. Here because "did the
+    client's retry rejoin the run?" is otherwise a guess."""
+    verify_token(authorization)
+    _shim_prune()
+    now = _time.time()
+    return {
+        "runs": [
+            {
+                "key": k[:12],
+                "done": r.done,
+                "error": r.error,
+                "chars": sum(len(p) for p in r.parts),
+                "age_s": round(now - r.started_at, 1),
+                "finished_s_ago": round(now - r.finished_at, 1) if r.finished_at else None,
+            }
+            for k, r in sorted(_SHIM_RUNS.items(), key=lambda kv: kv[1].started_at)
+        ],
+        "ttl_s": SHIM_RUN_TTL,
+    }
+
+
 @app.post("/v1/chat/completions")
 @limiter.limit("30/minute")
 async def openai_chat_completions(request: Request, req: OAChatRequest, authorization: Optional[str] = Header(None)):
