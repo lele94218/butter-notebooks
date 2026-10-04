@@ -1900,7 +1900,12 @@ def _shim_start(key: str, prompt: str, model: str, images) -> ShimRun:
     _shim_prune()
     existing = _SHIM_RUNS.get(key)
     if existing is not None:
+        logger.info(
+            f"[shim] reattach {key[:12]} "
+            f"({'finished' if existing.done else 'running'}, {len(existing.parts)} parts)"
+        )
         return existing
+    logger.info(f"[shim] new run {key[:12]} model={model} prompt={len(prompt)}ch")
 
     run = ShimRun()
     _SHIM_RUNS[key] = run
