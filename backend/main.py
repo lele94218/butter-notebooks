@@ -1831,13 +1831,122 @@ async def openai_models(request: Request, authorization: Optional[str] = Header(
     }
 
 
+# --- Shim run registry -------------------------------------------------------
+#
+# The web app's /v1/chat survives a dropped connection because the agent runs as
+# a background task writing to the database, and the HTTP stream merely tails
+# it. The shim used to run the agent inline with the request, so when iOS
+# suspends Chatbox the request is cancelled and the whole turn is lost — minutes
+# of work thrown away, with nothing to come back to.
+#
+# Runs now live here instead: started in the background, keyed by the content of
+# the request, and kept for a while after they finish. A client that drops and
+# resends the identical request rejoins the run in progress, or gets the
+# finished answer immediately.
+
+SHIM_RUN_TTL = 15 * 60          # how long a finished run stays claimable
+SHIM_MAX_RUNS = 32              # bounded: these hold whole answers in memory
+
+
+class ShimRun:
+    def __init__(self) -> None:
+        self.parts: list[str] = []
+        self.done = False
+        self.error: Optional[str] = None
+        self.finished_at: Optional[float] = None
+        self.started_at = _time.time()
+        # Bumped on every append so followers can wait instead of polling.
+        self.tick = asyncio.Event()
+        self.task: Optional[asyncio.Task] = None
+
+    def append(self, text: str) -> None:
+        self.parts.append(text)
+        self.tick.set()
+        self.tick = asyncio.Event()
+
+    def finish(self, error: Optional[str] = None) -> None:
+        self.error = error
+        self.done = True
+        self.finished_at = _time.time()
+        self.tick.set()
+
+
+_SHIM_RUNS: dict[str, ShimRun] = {}
+
+
+def _shim_prune() -> None:
+    now = _time.time()
+    for key, run in list(_SHIM_RUNS.items()):
+        if run.done and run.finished_at and now - run.finished_at > SHIM_RUN_TTL:
+            del _SHIM_RUNS[key]
+    # Still too many? Drop the oldest finished ones.
+    while len(_SHIM_RUNS) > SHIM_MAX_RUNS:
+        finished = [(r.finished_at or 0, k) for k, r in _SHIM_RUNS.items() if r.done]
+        if not finished:
+            break
+        del _SHIM_RUNS[min(finished)[1]]
+
+
+def _shim_run_key(model: str, prompt: str, images) -> str:
+    payload = json.dumps(
+        [model, prompt, [i.get("path") for i in (images or [])]],
+        ensure_ascii=False, sort_keys=True,
+    )
+    return hashlib.sha256(payload.encode()).hexdigest()
+
+
+def _shim_start(key: str, prompt: str, model: str, images) -> ShimRun:
+    """Return the run for this request, starting it if it isn't already going."""
+    _shim_prune()
+    existing = _SHIM_RUNS.get(key)
+    if existing is not None:
+        return existing
+
+    run = ShimRun()
+    _SHIM_RUNS[key] = run
+
+    async def drive():
+        try:
+            async for sse in run_agent_stream(prompt, None, model, images):
+                ev = _parse_sse_line(sse) or {}
+                et = ev.get("type")
+                if et == "delta":
+                    run.append(ev.get("text", ""))
+                elif et == "error":
+                    run.finish(ev.get("text") or "agent error")
+                    return
+            run.finish()
+        except asyncio.CancelledError:
+            run.finish("cancelled")
+            raise
+        except Exception:
+            logger.error(f"shim run failed: {traceback.format_exc()}")
+            run.finish("agent failed")
+
+    # Deliberately not tied to the request: the client going away must not stop
+    # the work, which is the whole point.
+    run.task = asyncio.create_task(drive())
+    return run
+
+
+async def _shim_follow(run: ShimRun):
+    """Yield this run's text from the beginning, then as it arrives."""
+    i = 0
+    while True:
+        while i < len(run.parts):
+            yield run.parts[i]
+            i += 1
+        if run.done:
+            return
+        await run.tick.wait()
+
+
 @app.post("/v1/chat/completions")
 @limiter.limit("30/minute")
 async def openai_chat_completions(request: Request, req: OAChatRequest, authorization: Optional[str] = Header(None)):
     verify_token(authorization)
     if not req.messages:
         raise HTTPException(status_code=400, detail="messages is required")
-    import time as _time
     # Extract first: the prompt references each image by the number assigned here.
     image_list, image_slots = _oa_extract_images(req.messages)
     images = image_list or None
@@ -1847,41 +1956,37 @@ async def openai_chat_completions(request: Request, req: OAChatRequest, authoriz
     cid = "chatcmpl-" + uuid.uuid4().hex
     created = int(_time.time())
 
+    # Started in the background and keyed by the request, so a client that drops
+    # mid-answer (iOS suspending Chatbox, say) can resend and pick it back up.
+    key = _shim_run_key(internal_model, prompt, images)
+    run = _shim_start(key, prompt, internal_model, images)
+
     if req.stream:
         async def gen():
             yield _oa_chunk(cid, created, mdl, {"role": "assistant"})
             buf = ""  # holds back a possibly-forming image markdown until complete
             try:
-                async for sse in run_agent_stream(prompt, None, internal_model, images):
-                    ev = _parse_sse_line(sse) or {}
-                    et = ev.get("type")
-                    if et == "delta":
-                        buf += ev.get("text", "")
-                        n = _safe_emit_len(buf)
-                        if n > 0:
-                            emit, buf = buf[:n], buf[n:]
-                            yield _oa_chunk(cid, created, mdl, {"content": _rewrite_md_images(emit)})
-                    elif et == "error":
-                        yield _oa_chunk(cid, created, mdl, {"content": f"\n[error: {ev.get('text')}]"})
-                        break
+                async for piece in _shim_follow(run):
+                    buf += piece
+                    n = _safe_emit_len(buf)
+                    if n > 0:
+                        emit, buf = buf[:n], buf[n:]
+                        yield _oa_chunk(cid, created, mdl, {"content": _rewrite_md_images(emit)})
             except Exception:
                 logger.error(f"openai shim stream failed: {traceback.format_exc()}")
                 yield _oa_chunk(cid, created, mdl, {"content": "\n[error: agent failed]"})
             if buf:
                 yield _oa_chunk(cid, created, mdl, {"content": _rewrite_md_images(buf)})
+            if run.error:
+                yield _oa_chunk(cid, created, mdl, {"content": f"\n[error: {run.error}]"})
             yield _oa_chunk(cid, created, mdl, {}, finish="stop")
             yield "data: [DONE]\n\n"
         return StreamingResponse(gen(), media_type="text/event-stream")
 
-    parts: list[str] = []
-    err: Optional[str] = None
-    async for sse in run_agent_stream(prompt, None, internal_model, images):
-        ev = _parse_sse_line(sse) or {}
-        if ev.get("type") == "delta":
-            parts.append(ev.get("text", ""))
-        elif ev.get("type") == "error":
-            err = ev.get("text")
-    text = "".join(parts)
+    while not run.done:
+        await run.tick.wait()
+    err: Optional[str] = run.error
+    text = "".join(run.parts)
     if err and not text:
         raise HTTPException(status_code=502, detail=err)
     text = _rewrite_md_images(text)

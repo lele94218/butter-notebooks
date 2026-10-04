@@ -188,8 +188,11 @@ The OpenAI-compatible shim means any client that speaks Chat Completions works:
 | API key | your `API_TOKEN` |
 
 It is stateless, as that protocol expects: the client resends the conversation
-each call and every turn runs fresh. The web app's own `/v1/chat` is the one
-that resumes sessions, so prefer it for long runs.
+each call. The run itself is not thrown away with the connection, though — it
+continues in the background, so a phone suspending the app mid-answer doesn't
+lose the turn, and resending the same request returns the finished answer
+immediately. The web app's `/v1/chat` still differs in that it reattaches on its
+own, without a resend.
 
 ## Project layout
 

@@ -104,7 +104,8 @@ The chat backend runs one of two CLIs, chosen by the request's `model`. The fron
 
 - **CORS**: `allow_origin_regex=".*"` (echoes the caller's origin) so webview clients' preflights pass — auth is the Bearer `API_TOKEN`, not CORS.
 - **Images**: `GET /v1/img?p=<abs>&t=<API_TOKEN>` serves image files under allowed roots (`$HOME` + `/tmp` + `/private/tmp`, image-only); token via query so a markdown `<img>` works. The shim rewrites **markdown images only** — `![alt](/local/path)` or `![alt](file:///…)` → `![alt](<served url>)` (`_rewrite_md_images`); bare paths in prose are left alone. Streaming holds back a forming image markdown (`_safe_emit_len`) until complete, then rewrites in place (no broken/duplicate image). The agent still has to actually produce the file. `PUBLIC_BASE_URL` env sets the public host.
-- **Caveat**: no resume. iOS backgrounding drops the connection → the turn fails with no recovery (unlike the web app's `/v1/chat`, which persists + resumes). Use the web app for long turns.
+- **Dropped connections**: the agent runs as a background task in a registry keyed by the content of the request (`_shim_start` / `_shim_follow`), not inline with the HTTP stream. So iOS suspending Chatbox no longer kills the turn — the work finishes, and resending the identical request rejoins it or returns the finished answer (measured: ~200ms instead of a fresh run). Finished runs are held `SHIM_RUN_TTL` (15 min), capped at `SHIM_MAX_RUNS`.
+- **Still not the same as `/v1/chat`**: the client has to resend to pick a run back up, since Chat Completions has no way to reattach to one. The web app reattaches on its own.
 
 ## Secrets and redaction (the repo is public-facing)
 
