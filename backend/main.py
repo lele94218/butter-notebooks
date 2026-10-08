@@ -629,50 +629,26 @@ async def run_agent_stream(
     model: Optional[str] = None,
     images: Optional[list[dict]] = None,
 ):
-    """Stream a turn as SSE, self-healing stale Claude CLI sessions.
+    """Stream one turn as SSE against the agent the model selects.
 
-    If resuming `session_id` fails or yields an empty turn (no content) — which
-    happens when the CLI session has expired ("No conversation found") — retry
-    once with a fresh session so the question still gets answered. The caller
-    persists the new session_id, so the conversation continues from there.
+    A failed turn is reported as a failure. There used to be a retry here that
+    started a fresh session when a resume "produced no output", on the theory
+    that the CLI session had expired — but it could not tell an expired session
+    from a turn that legitimately said nothing, or from the upstream provider
+    having a bad minute. Every time it guessed wrong it silently swapped the
+    conversation for an empty one, and days of context were gone with no sign
+    that anything had happened. It cost more than it ever recovered:
+
+      - a message beginning with "-" made the CLI exit on argument parsing
+      - `/compact` answers with no assistant text at all
+      - a 503 from the provider, mid-run, on an otherwise healthy session
+
+    An error now surfaces as an error, and the session is left alone. Retrying
+    is the reader's call, and retrying works, because the session still exists.
     """
     attempt_fn = _codex_attempt if _is_codex_model(model) else _cli_attempt
-    attempt_session = session_id
-    for attempt_no in (1, 2):
-        produced = False
-        saw_session = False
-        retry = False
-        async for sse in attempt_fn(prompt, attempt_session, model, images):
-            ev = _parse_sse_line(sse) or {}
-            et = ev.get("type")
-            if et in ("delta", "thinking", "tool_use", "tool_result"):
-                produced = True
-                yield sse
-            elif et == "session":
-                # The CLI only reports a session once it has actually started,
-                # so this means the resume worked.
-                saw_session = True
-                yield sse
-            elif et in ("done", "error"):
-                # Failed resume: retry once with a fresh session. A turn that
-                # simply says nothing is NOT a failure — `/compact` and friends
-                # answer with no assistant text, and healing those threw the
-                # conversation away. Only heal when the CLI never even started.
-                if attempt_session and not produced and not saw_session and attempt_no == 1:
-                    retry = True
-                    break
-                yield sse
-                return
-            else:
-                yield sse
-        if retry:
-            logger.warning(
-                f"resume of session {attempt_session} produced no output "
-                f"(likely expired); retrying with a fresh session"
-            )
-            attempt_session = None
-            continue
-        return
+    async for sse in attempt_fn(prompt, session_id, model, images):
+        yield sse
 
 
 # --- Persistent background agent runner ---
